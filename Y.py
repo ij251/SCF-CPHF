@@ -10,6 +10,7 @@ H2_G0_ghf = np.block([
     [np.zeros((2,2)), H2_G0_rhf],
     ])
 
+# Not sure what this is for?
 H2_G0_ghf[:,[1,2]] = H2_G0_ghf[:,[2,1]]
 
 def get_P1(eta0, G0, F1, nelec, complexsymmetric: bool):
@@ -24,10 +25,19 @@ def get_P1(eta0, G0, F1, nelec, complexsymmetric: bool):
     F1 is the first order Fock matrix that depends on P1
     (the first order density matrix) and hence Y'
 
+    # Perhaps use nbasis = G0.shape[0] for better clarity.
+    # Also, add an assert statement to make sure that G0 has the right number of
+    # columns.
     nbasis = len(G0)
     nocc = nelec
     nvir = nbasis - nelec
-    
+
+    # This creates an array of floats. There will be issues later on when
+    # complex numbers are added as casting from complex to real will cause the
+    # imaginary parts to be lost. Set the datatype of y to the maximum datatype
+    # of the input G0 and F1. Each datatype as a unique number (see
+    # https://numpy.org/doc/stable/reference/generated/numpy.dtype.num.html#numpy.dtype.num).
+    # Perhaps you can use this to work out what the maximum datatype is.
     y = np.zeros((nbasis,nbasis))
 
     for i in range(nocc):
