@@ -1,4 +1,5 @@
 from pyscf import gto, scf
+import numpy as np
 
 
 mol = gto.M(atom=("H 0 0 0;"
@@ -6,20 +7,27 @@ mol = gto.M(atom=("H 0 0 0;"
             basis='sto3g',
             unit='Angstrom')
 
-m = mol.intor("int1e_ovlp")
+#m = mol.intor("int1e_ovlp")
 #print(m)
 
-n = mol.intor("int1e_ipovlp")
-print(n)
+#n = mol.intor("int1e_ipovlp")
+#print(n)
 
-nuc = mol.intor("int1e_ipnuc")
-kin = mol.intor("int1e_ipkin")
+#nuc = mol.intor("int1e_ipnuc")
+#kin = mol.intor("int1e_ipkin")
 
-h = nuc + kin
+#h = nuc + kin
 
-print(h)
+#print(h)
 
-e_2 = mol.intor("int2e")
+twoe = mol.intor("int2e_ip1")
+print(twoe)
 
-#print(e_2)
+print(len(twoe))
+
+Pi1 = np.zeros((len(twoe[2]),len(twoe[2]),len(twoe[2]),len(twoe[2])))
+print(Pi1)
+
+for i in range(len(twoe[2])):
+    print(i)
 
