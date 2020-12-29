@@ -36,7 +36,6 @@ p0_h2 = get_p0(h2_g0_ghf, "False")
 print(p0_h2)
 
 
-
 def get_pi0(molecule):
 
     '''function to generate zeroth order Pi tensor'''
@@ -49,6 +48,7 @@ def get_pi0(molecule):
     pi0 = j - k
 
     return pi0
+
 
 def get_hcore(molecule):
 
@@ -63,7 +63,7 @@ def get_hcore(molecule):
 def get_f0(hcore, pi0, p0):
 
     '''function to generate zeroth order Fock matrix'''
-    
+
     omega = np.identity(2)
     f0_1e = np.kron(omega, hcore)
     f0_2e = np.einsum("ijkl,lk->ij", pi0, p0)
@@ -71,12 +71,5 @@ def get_f0(hcore, pi0, p0):
 
     return f0
 
-    
 
 print(get_F0(get_Hcore(h2), get_pi0(h2), P0_h2))
-
-
-    
-
-
-    
