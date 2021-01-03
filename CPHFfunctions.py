@@ -1,11 +1,22 @@
-from pyscf import gto, scf
+from pyscf import gto, scf, grad
 import numpy as np
 
 
 def get_p0(g0, complexsymmetric: bool):
 
-    '''Example function to generate zeroth order density matrix from
-    coefficient matrix in either hermitian or complexsymmetric case'''
+    r"""Calculates the zeroth order density matrix from the zeroth order
+    coefficient matrix. It is defined by:
+
+    .. math::
+
+        \mathbf{P^{(0)}}=\mathbf{G^{(0)}G^{(0)\dagger\diamond}}
+
+    :param g0: zeroth order GHF coefficient matrix, e.g from QChem.
+    :param complexsymmetric: If :const:'True', :math:'/diamond = /star'.
+            If :const:'False', :math:'\diamond = \hat{e}'.
+
+    :returns: The zeroth order density matrix.
+    """
 
     if not complexsymmetric:
         p0 = np.matmul(g0, g0.T.conj())
@@ -15,21 +26,46 @@ def get_p0(g0, complexsymmetric: bool):
     return p0
 
 
-def get_hcore0(molecule):
+def get_hcore0(mol):
 
-    '''function to generate zeroth order core hamiltonian'''
+    r"""Calculates The zeroth order core hamiltonian.
+    Each element is given by:
 
-    hcore = molecule.intor('int1e_nuc')\
-            + molecule.intor('int1e_kin')
+    .. math::
+
+        \left(\mathbf{H_{core}^{(0)}}\right)_{\mu\nu}
+        =\left(\phi_{\mu}\left|\mathbf{\hat{H}_{core}}\right|\phi_{\nu}\right)
+
+    :param mol: The class for a molecule as defined by PySCF.
+
+    :returns: The zeroth order core hamiltonian matrix.
+    """
+
+    hcore0 = mol.intor('int1e_nuc')\
+            + mol.intor('int1e_kin')
 
     return hcore0
 
 
-def get_pi0(molecule):
+def get_pi0(mol):
 
-    '''function to generate zeroth order Pi tensor'''
+    r"""Calculate the 4 dimensional zeroth order Pi tensor.
+    Each element is given by:
 
-    spatial_j = molecule.intor('int2e')
+    .. math::
+
+        \mathbf{\Pi_{\delta'\mu',\epsilon'\nu',\delta\mu,\epsilon\nu}^{(0)}}
+        = \mathbf{\Omega_{\delta'\delta}\Omega_{\epsilon'\epsilon}}
+          \left(\mu'\mu|\nu'\nu\right)
+        - \mathbf{\Omega_{\delta'\epsilon}\Omega_{\epsilon'\delta}}
+          \left(\mu'\nu|\nu'\mu\right)
+
+    :param mol: The class for a molecule as defined by PySCF.
+
+    :returns: The zeroth order Pi tensor.
+    """
+
+    spatial_j = mol.intor('int2e')
     omega = np.identity(2)
     spin_j = np.einsum("ij,kl->ikjl", omega, omega)
     j = np.kron(spin_j, spatial_j)
@@ -41,7 +77,20 @@ def get_pi0(molecule):
 
 def get_f0(hcore0, pi0, p0):
 
-    '''function to generate zeroth order Fock matrix'''
+    r"""Calculates the zeroth order fock matrix, defined by:
+
+    .. math::
+
+        \mathbf{F^{(0)}}
+        =\mathbf{H_{core}^{(0)}}
+        +\mathbf{\Pi^{(0)}}\cdot\mathbf{P^{(0)}}
+
+    :param hcore0: Zeroth order core hamiltonian matrix.
+    :param pi0: Zeroth order 4 dimensional Pi tensor.
+    :param p0: Zeroth order density matrix.
+
+    :returns: The zeroth order fock matrix
+    """
 
     omega = np.identity(2)
     f0_1e = np.kron(omega, hcore0)
@@ -51,57 +100,140 @@ def get_f0(hcore0, pi0, p0):
     return f0
 
 
-def get_hcore1(molecule, atom):
+def get_hcore1(mol, atom, coord):
 
-    '''function to generate first order core hamiltonian,
-    requires which atom is being perturbed as an input'''
+    r"""Calculates the first order core hamiltonian matrix.
+    Each element is given by:
 
-    mf = scf.RHF(molecule)
+    .. math::
+
+        \left(\mathbf{H_{core}^{(1)}}\right)_{\mu\nu}
+        = \left(\frac{\partial\phi_{\mu}}{\partial a}\left|
+        \mathbf{\hat{H}_{core}}\right|\phi_{\nu}\right)
+        + \left(\phi_{\mu}\left|\frac{\partial\mathbf{\hat{H}_{core}}}
+        {\partial a}\right|\phi_{\nu}\right)
+        + \left(\phi_{\mu}\left|\mathbf{\hat{H}_{core}}\right|
+        \frac{\partial\phi_{\nu}}{\partial a}\right)
+
+    (Note that :math:'a' is a particular specified pertubation, e.g movement
+    in the x direction of atom 1)
+
+    :param mol: Molecule class as defined by PySCF.
+    :param atom: Input for which atom is being perturbed, with atoms numbered
+            according to the PySCF molecule.
+    :param coord: Input for along which coordinate the pertubation of the atom
+            coord = '0' for x
+                    '1' for y
+                    '2' for z
+
+    :returns: First order core hamiltonian matrix.
+    """
+
+    mf = scf.RHF(mol)
     g = grad.rhf.Gradients(mf)
 
-    hcore1 = g.hcore_generator(molecule)(atom)
+    hcore1 = g.hcore_generator(mol)(atom)[coord]
 
     return hcore1
 
 
-def get_pi1(molecule):
+def get_pi1(mol, atom, coord):
 
-    '''This function takes the 4 dimensional integral derivative tensor from
-    PySCF and digests the integrals to construct the first order Pi tensor'''
+    r"""Calculates the 4 dimensional first order pi tensor by digesting the
+    of 2 electron integrals given by PySCF.
+    Symmetry of the 2 electron integrals is manipulated to digest the PySCF
+    tensor, in which the first MO of each 2 electron integral has been
+    differentiated.
+    Each element is given by:
+
+    .. math::
+
+       \mathbf{\Pi_{\delta'\mu',\epsilon'\nu',\delta\mu,\epsilon\nu}^{(1)}}
+       = \mathbf{\Omega_{\delta'\delta}\Omega_{\epsilon'\epsilon}}
+       \left(\mu'\mu|\nu'\nu\right)^{(1)}
+       -\mathbf{\Omega_{\delta'\epsilon}\Omega_{\epsilon'\delta}}
+       \left(\mu'\nu|\nu'\mu\right)^{(1)}
+
+       \left(\mu'\mu|\nu'\nu\right)^{(1)}
+       =\left(\frac{\partial\phi_{\mu'}}{\partial a}\phi_{\mu}|
+       \phi_{\nu'}\phi_{\nu}\right)
+       +\left(\phi_{\mu'}\frac{\partial\phi_{\mu}}{\partial a}|
+       \phi_{\nu'}\phi_{\nu}\right)
+       +\left(\phi_{\mu'}\phi_{\mu}|
+       \frac{\partial\phi_{\nu'}}{\partial a}\phi_{\nu}\right)
+       +\left(\phi_{\mu'}\phi_{\mu}|
+       \phi_{\nu'}\frac{\partial\phi_{\nu}}{\partial a}\right)
+
+    :param mol: Molecule class as defined by PySCF.
+    :param atom: Input for which atom is being perturbed, with atoms numbered
+            according to the PySCF molecule.
+    :param coord: Input for along which coordinate the pertubation of the atom
+            lies.
+            coord = '0' for x
+                    '1' for y
+                    '2' for z
+
+    :returns: First order 4 dimensional pi tensor.
+    """
 
     omega = np.identity(2)
     spin_j = np.einsum("ij,kl->ikjl", omega, omega)
 
-    twoe = molecule.intor("int2e_ip1")
-    twoe_x = molecule.intor("int2e_ip1")[0]
-    twoe_y = molecule.intor("int2e_ip1")[1]
-    twoe_z = molecule.intor("int2e_ip1")[2]
+    twoe = mol.intor("int2e_ip1")[coord]
 
-    j1z_spatial = np.zeros((len(twoe_z),len(twoe_z),len(twoe_z),len(twoe_z)))
+    j1_spatial = np.zeros((len(twoe),len(twoe),len(twoe),len(twoe)))
 
-    for i in range(len(twoe_z)):
-        for j in range(len(twoe_z)):
-            for k in range(len(twoe_z)):
-                for l in range(len(twoe_z)):
+    for i in range(len(twoe)):
 
-                    j1z_spatial[i][j][k][l] += (twoe_z[i][j][k][l]\
-                                        + twoe_z[j][i][k][l]\
-                                        + twoe_z[k][l][i][j]\
-                                        + twoe_z[l][k][i][j])
+        lambda_i = int(i in range(mol.aoslice_by_atom()[atom][2],
+                                  mol.aoslice_by_atom()[atom][3]))
 
-    j1z = np.kron(spin_j, j1z_spatial)
-    k1z = np.einsum("ijkl->ilkj", j1z)
+        for j in range(len(twoe)):
 
-    pi1z = j1z - k1z
+            lambda_j = int(j in range(mol.aoslice_by_atom()[atom][2],
+                                      mol.aoslice_by_atom()[atom][3]))
 
-    return pi1z
+            for k in range(len(twoe)):
+
+                lambda_k = int(k in range(mol.aoslice_by_atom()[atom][2],
+                                          mol.aoslice_by_atom()[atom][3]))
+
+                for l in range(len(twoe)):
+
+                    lambda_l = int(l in range(mol.aoslice_by_atom()[atom][2],
+                                              mol.aoslice_by_atom()[atom][3]))
+
+                    j1_spatial[i][j][k][l] += (twoe[i][j][k][l] * lambda_i
+                                               + twoe[j][i][k][l] * lambda_j
+                                               + twoe[k][l][i][j] * lambda_k
+                                               + twoe[l][k][i][j] * lambda_k)
+
+    j1 = np.kron(spin_j, j1_spatial)
+    k1 = np.einsum("ijkl->ilkj", j1)
+
+    pi1 = j1 - k1
+
+    return pi1
 
 
-def get_f1(pi1, p1, hcore1, pi0, p0):
+def get_f1(pi0, p0, hcore1, pi1, p1):
 
-    '''This function calculates the first order fock matrix from the first 
-    order Pi tensor, density matrix and core hamiltonian, and the zeroth order
-    density matrix and Pi tensor'''
+    r"""Calculate the first order fock matrix, defined by
+
+    .. math::
+
+        \mathbf{F^{(1)}}=\mathbf{H_{core}^{(1)}}+\mathbf{\Pi^{(1)}}\cdot
+        \mathbf{P^{(0)}}+\mathbf{\Pi^{(0)}}\cdot\mathbf{P^{(1)}}
+
+    :param pi0: 4 dimensional zeroth order Pi tensor of 2 electron integrals
+    :param p0: Zeroth order density matrix
+    :param hcore1: First order core hamiltonian after particular pertubation
+    :param pi1: 4 dimensional first order Pi tensor of differentiated 2
+            electron integrals after particular pertubation
+    :param p1: First order density matrix
+
+    :returns: First order fock matrix.
+    """
 
     f1_1 = np.kron(omega, hcore1)
     f1_2 = np.einsum("ijkl,lk->ij", pi0, p1)
@@ -112,17 +244,36 @@ def get_f1(pi1, p1, hcore1, pi0, p0):
     return f1
 
 
-def get_p1(eta0, g0, f1, nelec, complexsymmetric: bool):
+def get_p1(f0, g0, f1, nelec, complexsymmetric: bool):
 
-    'G0 is a GHF coefficient matrix of molecular orbital coefficients in terms
-    of basis functions of dimension 2*N_spatial, allowing for mixing of alpha
-    and beta spin functions. ie G0 = np.array([N_basis, N_basis]), so G0[i,j] 
-    is the coefficient of the ith basis function in the jth MO. It has been 
-    ordered in occupied and virtual blocks'
+    r"""Calculates the first order density matrix containing information about
+    how the molecular orbital coefficients change upon a pertubation.
+    It is :math:'\mathbf{P^{(1)}}=\mathbf{Y}+\mathbf{Y^{\dagger\diamond}}'
+    where Y is given by:
 
-    'eta0 is a vector of orbital energy eigenvalues
-    F1 is the first order Fock matrix that depends on P1
-    (the first order density matrix) and hence Y'
+    .. math::
+
+        \mathbf{Y}
+        =\sum\limits_i^{occ}\sum\limits_{i'}^{vir}
+        \frac{1}{\eta_i-\eta_{i'}}
+        \mathbf{G}^{(0)}_i\mathbf{G}^{(0)\dagger\diamond}_{i'}
+        \mathbf{F}^{(1)}
+        \mathbf{G}^{(0)}_i\mathbf{G}^{(0)\dagger\diamond}_{i'}
+
+    :param f0: The zeroth order fock matrix from which the orbital energy
+            eigenvalues are obtained.
+    :param g0: The zeroth order matrix of molecular orbital coefficients.
+    :param f1: The first order fock matrix that is dependant on p1.
+    :param nelec: The number of electrons in the molecule, determines which
+            orbitals are occupied and virtual.
+    :param complexsymmetric: If :const:'True', :math:'/diamond = /star'.
+            If :const:'False', :math:'\diamond = \hat{e}'.
+
+    :returns: The first order fock matrix, from which the perturbed energy can
+            be obtained.
+    """
+
+    eta0 = np.sort(np.linalg.eigvals(f0))
 
     nbasis = len(g0)
     nocc = nelec
@@ -135,21 +286,21 @@ def get_p1(eta0, g0, f1, nelec, complexsymmetric: bool):
 
             if not complexsymmetric:
 
-                y += 1/(eta0[i] - eta0[nocc+j]) *
-                np.linalg.multi_dot([
-                    np.outer(g0[:,i], g0.T.conj()[:,i]),
-                    F1,
-                    np.outer(g0[:,nocc+j], g0.T.conj()[:,nocc+j])
-                    ])
+                y += ((1/(eta0[i] - eta0[nocc+j]))
+                      * np.linalg.multi_dot([np.outer(g0[:,i],
+                                                      g0.T.conj()[:,i]),
+                                            f1,
+                                            np.outer(g0[:,nocc+j],
+                                                     g0.T.conj()[:,nocc+j])]))
 
             else:
 
-                y += 1/(eta0[i] - eta0[nocc+j]) *
-                np.linalg.multi_dot([
-                    np.outer(g0[:,i], g0.T[:,i]),
-                    f1,
-                    np.outer(g0[:,nocc+j], g0.T()[:,nocc+j])
-                    ])
+                y += ((1/(eta0[i] - eta0[nocc+j]))
+                      * np.linalg.multi_dot([np.outer(g0[:,i],
+                                                      g0.T[:,i]),
+                                            f1,
+                                            np.outer(g0[:,nocc+j],
+                                                     g0.T()[:,nocc+j])]))
 
     if not complexsymmetric:
         p1 = y + y.T.conj()
