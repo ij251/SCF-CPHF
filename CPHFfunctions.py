@@ -235,6 +235,7 @@ def get_f1(pi0, p0, hcore1, pi1, p1):
     :returns: First order fock matrix.
     """
 
+    omega = np.identity(2)
     f1_1 = np.kron(omega, hcore1)
     f1_2 = np.einsum("ijkl,lk->ij", pi0, p1)
     f1_3 = np.einsum("ijkl,lk->ij", pi1, p0)
@@ -300,7 +301,7 @@ def get_p1(f0, g0, f1, nelec, complexsymmetric: bool):
                                                       g0.T[:,i]),
                                             f1,
                                             np.outer(g0[:,nocc+j],
-                                                     g0.T()[:,nocc+j])]))
+                                                     g0.T[:,nocc+j])]))
 
     if not complexsymmetric:
         p1 = y + y.T.conj()
@@ -308,3 +309,52 @@ def get_p1(f0, g0, f1, nelec, complexsymmetric: bool):
         p1 = y + y.T
 
     return p1
+
+
+def p1_iteration(p1_guess, mol, g0, atom, coord, nelec, complexsymmetric: bool
+                 ):
+
+    r"""Calculates the first order density matrix self consistently given that
+    :math:'\mathbf{P^{(1)}}' and :math:'\mathbf{F^{(1)}}' depend on one
+    another.
+
+    :param p1_guess: An initial guess for the first order denisty matrix, a
+            matrix of zeros seems to work well for now, perhaps due to the
+            pertubation being necessarily small, and other guesses converge to
+            the same matrix.
+    :param mol: Molecule class as defined by PySCF.
+    :param g0: Matrix of zeroth order molecular orbital coefficients e.g from
+            Qchem.
+    :param atom: Input for which atom is being perturbed, with atoms numbered
+            according to the PySCF molecule.
+    :param coord: Input for along which coordinate the pertubation of the atom
+            lies.
+            coord = '0' for x
+                    '1' for y
+                    '2' for z
+    :param nelec: The number of electrons in the molecule, determines which
+            orbitals are occupied and virtual.
+    :param complexsymmetric: If :const:'True', :math:'/diamond = /star'.
+            If :const:'False', :math:'\diamond = \hat{e}'.
+
+    ;returns: The converged first order density matrix.
+    """
+
+    p1 = p1_guess
+    delta_p1 = 1
+    iter_num = 0
+
+    while delta_p1 > 1E-10:
+
+        iter_num += 1
+        f1 = get_f1(get_pi0(mol), get_p0(g0, complexsymmetric),
+                    get_hcore1(mol, atom, coord), get_pi1(mol, atom, coord),
+                    p1)
+
+        p1_last = p1
+        p1 = get_p1(get_f0(get_hcore0(mol), get_pi0(mol),
+                    get_p0(g0, complexsymmetric)),
+                    g0, f1, nelec, complexsymmetric)
+        delta_p1 = np.max(np.abs(p1 - p1_last))
+
+    return p1#, iter_num
