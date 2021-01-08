@@ -1,6 +1,34 @@
 from pyscf import gto, scf, grad
 import numpy as np
 
+def get_x(s_ao):
+
+    r"""Calculates canonical basis orthogonalisation matrix x, defined by:
+
+    .. math:: 
+
+        \mathbf{X}=\mathbf{Us^{-\frac{1}{2}}}}
+
+    where U is the matrix of eigenvectors of s_ao, and
+    :math:'s^{-\frac{1}{2}}}' is the diagonal matrix of inverse square root
+    eigenvalues of s_ao.
+
+    :param s_ao: atomic orbital overlap matrix
+
+    :returns: the orthogonalisation matrix x
+    """
+
+    nbasis = len(s_ao)
+
+    s2 = np.zeros([nbasis,nbasis])
+
+    for i in range(nbasis):
+
+        s2[i,i] = (np.linalg.eig(s_ao)[0][i])**-0.5
+
+    x = np.matmul(np.linalg.eig(s_ao)[1], s2)
+
+    return x
 
 def get_p0(g0, complexsymmetric: bool):
 
@@ -41,8 +69,8 @@ def get_hcore0(mol):
     :returns: The zeroth order core hamiltonian matrix.
     """
 
-    hcore0 = mol.intor('int1e_nuc')\
-            + mol.intor('int1e_kin')
+    hcore0 = (mol.intor('int1e_nuc')
+              + mol.intor('int1e_kin'))
 
     return hcore0
 
@@ -66,10 +94,11 @@ def get_pi0(mol):
     """
 
     spatial_j = mol.intor('int2e')
+    phys_spatial_j = np.einsum("abcd->acbd", spatial_j)
     omega = np.identity(2)
     spin_j = np.einsum("ij,kl->ikjl", omega, omega)
-    j = np.kron(spin_j, spatial_j)
-    k = np.einsum("ijkl->ilkj", j)
+    j = np.kron(spin_j, phys_spatial_j)
+    k = np.einsum("ijkl->ijlk", j)
     pi0 = j - k
 
     return pi0
@@ -94,7 +123,7 @@ def get_f0(hcore0, pi0, p0):
 
     omega = np.identity(2)
     f0_1e = np.kron(omega, hcore0)
-    f0_2e = np.einsum("ijkl,lk->ij", pi0, p0)
+    f0_2e = np.einsum("ijkl,lj->ik", pi0, p0)
     f0 = f0_1e + f0_2e
 
     return f0
@@ -206,10 +235,11 @@ def get_pi1(mol, atom, coord):
                     j1_spatial[i][j][k][l] += (twoe[i][j][k][l] * lambda_i
                                                + twoe[j][i][k][l] * lambda_j
                                                + twoe[k][l][i][j] * lambda_k
-                                               + twoe[l][k][i][j] * lambda_k)
+                                               + twoe[l][k][i][j] * lambda_l)
 
-    j1 = np.kron(spin_j, j1_spatial)
-    k1 = np.einsum("ijkl->ilkj", j1)
+    phys_j1_spatial = np.einsum("abcd->acbd", j1_spatial)
+    j1 = np.kron(spin_j, phys_j1_spatial)
+    k1 = np.einsum("ijkl->ijlk", j1)
 
     pi1 = j1 - k1
 
@@ -235,10 +265,10 @@ def get_f1(pi0, p0, hcore1, pi1, p1):
     :returns: First order fock matrix.
     """
 
-    omega = np.identity(2)
+    omega = np.dividentity(2)
     f1_1 = np.kron(omega, hcore1)
-    f1_2 = np.einsum("ijkl,lk->ij", pi0, p1)
-    f1_3 = np.einsum("ijkl,lk->ij", pi1, p0)
+    f1_2 = np.einsum("ijkl,lj->ik", pi0, p1)
+    f1_3 = np.einsum("ijkl,lj->ik", pi1, p0)
 
     f1 = f1_1 + f1_2 + f1_3
 
@@ -358,3 +388,16 @@ def p1_iteration(p1_guess, mol, g0, atom, coord, nelec, complexsymmetric: bool
         delta_p1 = np.max(np.abs(p1 - p1_last))
 
     return p1#, iter_num
+
+
+def get_e1(p0, p1, f0, f1):
+
+    p = p0 + p1
+    f = f0 + f1
+
+    e0 = np.einsum("ij,ji->", f0, p0)
+    e = np.einsum("ij,ji->", f, p)
+
+    e1 = e - e0
+
+    return e1, e0
