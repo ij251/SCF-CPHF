@@ -46,15 +46,12 @@ f0_h2 = get_f0(get_hcore0(h2), get_pi0(h2), p0_h2)
 f1_h2 = get_f1(get_pi0(h2), p0_h2, get_hcore1(h2, 0, 2), get_pi1(h2, 0, 2),
                p1_h2)
 
-e0 = get_e1(p0_h2, p1_h2, f0_h2, f1_h2)[1]
-print(e0)
-print("\n")
 #print(get_pi0(h2))
 #print(p0_h2)
 #print("\n")
 #print(h2_g0_ghf)
 #print("\n")
-#print(p1_h2)
+print(p1_h2)
 #print("\n")
 #print(get_pi0(h2))
 #print("\n")
