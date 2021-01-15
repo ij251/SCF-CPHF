@@ -460,19 +460,150 @@ def p1_iteration(p1_guess, mol, g0, p0, atom, coord, nelec,
 
         delta_p1 = np.max(np.abs(p1 - p1_last))
 
-    return p1#, iter_num
+    return p1, iter_num
 
 
-def get_e0(hcore0, pi0, p0):
+def get_e0_nuc(mol):
+
+    r"""Calculates the zeroth order nuclear repulsion energy.
+    This is given by the following expression, where N is the total number of
+    nuclei in the system, A and B are nuclear indices, Z is the atomic number,
+    and R_{AB} is the distance between nucei A and B:
+
+    .. math::
+
+        E^{(0)}_{nuc} = \sum\limits_{A>B}^N\frac{Z_AZ_B}{R_{AB}}
+
+    :param mol: The pyscf molecule class, from which the nuclear coordinates
+            and atomic numbers are taken.
+
+    :returns: The zeroth order nuclear repulsion energy.
+    """
+
+    e0_nuc = 0
+
+    for a in range(len(mol.atom_charges())):
+        for b in range(a+1, len(mol.atom_charges())):
+
+            r_ab2 = np.dot(mol.atom_coord(a) - mol.atom_coord(b),
+                           mol.atom_coord(a) - mol.atom_coord(b))
+            r_ab = np.sqrt(r_ab2)
+
+            e0_nuc += (mol.atom_charge(a) * mol.atom_charge(b)) / r_ab
+
+    return e0_nuc
+
+
+def get_e1_nuc(mol, atom, coord):
+
+    r"""Calculates the first order nuclear repulsion energy.
+    This is given by the following expresison, where X_A is a particular
+    cartesian coordinate of atom A:
+
+    .. math::
+
+            $$E^{(1)}_{nuc} = \frac{\partial E^{(0)}_{nuc}}{\partial X_A}=
+            \sum\limits_{B \neq A}^N
+            \left(X_B-X_A\right)\frac{Z_AZ_B}{R^3_{AB}}$$
+
+    :param mol: The pyscf molecule class, from which the nuclear coordinates
+            and atomic numbers are taken.
+    :param atom: Input for which atom is being perturbed, with atoms numbered
+            according to the PySCF molecule.
+    :param coord: Input for along which coordinate the pertubation of the atom
+            lies.
+            coord = '0' for x
+                    '1' for y
+                    '2' for z
+
+    :returns: The first order nuclear repulsion energy.
+    """
+
+    e1_nuc = 0
+    a = atom
+
+    for b in range(len(mol.atom_charges())):
+
+        if b == atom:
+            continue
+
+        r_ab2 = np.dot(mol.atom_coord(a) - mol.atom_coord(b),
+                       mol.atom_coord(a) - mol.atom_coord(b))
+        r_ab = np.sqrt(r_ab2)
+        r_ab3 = r_ab ** 3
+
+        x_ab = mol.atom_coord(b)[coord] - mol.atom_coord(a)[coord]
+
+
+        e1_nuc += x_ab * (mol.atom_charge(a) * mol.atom_charge(b)) / r_ab3
+
+    return e1_nuc
+
+
+def get_e0_elec(mol, p0):
+
+    r"""Calculates the zeroth order electronic energy.
+    This is a contraction of the zeroth order density matrix with zeroth order
+    core hamiltonian and pi tensors:
+
+    .. math::
+
+        E^{(0)}_{elec} = \mathbf{H_{core}^{(0)}}\cdot\mathbf{P^{(0)}}
+        + \frac{1}{2}\mathbf{\Pi^{(0)}}
+        \cdot\mathbf{P^{(0)}}\cdot\mathbf{P^{(0)}}
+
+    :param mol: The pyscf molecule class, from which the nuclear coordinates
+            and atomic numbers are taken.
+    :param p0: The zeroth order density matrix.
+
+    :returns: The zeroth order Hartree Fock electronic energy
+    """
+
+    hcore0 = get_hcore0(mol)
+    pi0 = get_pi0(mol)
 
     e0_1e = np.einsum("ij,ji->", hcore0, p0)
     e0_2e = np.einsum("ijkl,lj,ki->", pi0, p0, p0) * 0.5
-    e0 = e0_1e + e0_2e
+    e0_elec = e0_1e + e0_2e
 
-    return e0
+    return e0_elec
 
 
-def get_e1(p0, p1, hcore0, hcore1, pi0, pi1, e0):
+def get_e1_elec(mol, p0, p1, atom, coord):
+
+    r"""Calculates the first order electronic energy.
+    First the full electronic energy is found by contraction of the full
+    density matrix with full core hamiltonian and pi tensors, then the zeroth
+    order electronic energy is subtracted from this to obtain the first order.
+
+    .. math::
+
+        E_{elec} = \mathbf{H_{core}}\cdot\mathbf{P}}
+        + \frac{1}{2}\mathbf{\Pi}
+        \cdot\mathbf{P}\cdot\mathbf{P}
+
+        E^{(1)}_{elec} = E_{elec} - E^{(0)}_{elec}
+
+    :param mol: The pyscf molecule class, from which the nuclear coordinates
+            and atomic numbers are taken.
+    :param p0: The zeroth order density matrix.
+    :param p1: The first order density matrix.
+    :param atom: Input for which atom is being perturbed, with atoms numbered
+            according to the PySCF molecule.
+    :param coord: Input for along which coordinate the pertubation of the atom
+            lies.
+            coord = '0' for x
+                    '1' for y
+                    '2' for z
+
+    :returns: The first order electronic energy
+    """
+
+    hcore0 = get_hcore0(mol)
+    pi0 = get_pi0(mol)
+    e0_elec = get_e0_elec(mol, p0)
+    hcore1 = get_hcore1(mol, atom, coord)
+    pi1 = get_pi1(mol, atom, coord)
 
     p = p0 + p1
     hcore = hcore0 + hcore1
@@ -480,8 +611,8 @@ def get_e1(p0, p1, hcore0, hcore1, pi0, pi1, e0):
 
     etot_1e = np.einsum("ij,ji->", hcore, p)
     etot_2e = np.einsum("ijkl,lj,ki->", pi, p, p) * 0.5
-    etot = etot_1e + etot_2e
+    etot_elec = etot_1e + etot_2e
 
-    e1 = etot - e0
+    e1_elec = etot_elec - e0_elec
 
-    return e1
+    return e1_elec
