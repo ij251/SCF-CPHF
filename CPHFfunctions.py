@@ -1,8 +1,34 @@
 from pyscf import gto, scf, grad
 import numpy as np
 
+def get_s(mol, atom, coord):
 
-def get_x(mol, thresh: float = 1e-14):
+    """function to calculate first order pertubation to the orbital overlap
+    matrix"""
+
+    s0 = mol.intor("int1e_ovlp")
+    onee = mol.intor("int1e_ipovlp")
+    s1 = np.zeros_like(s0)
+
+    for i in range(s0.shape[1]):
+
+        lambda_i = int(i in range(mol.aoslice_by_atom()[atom][2],
+                                  mol.aoslice_by_atom()[atom][3]))
+
+        for j in range(s0.shape[1]):
+
+            lambda_j = int(j in range(mol.aoslice_by_atom()[atom][2],
+                                      mol.aoslice_by_atom()[atom][3]))
+
+
+            s1[i][j] += onee[coord][i][j]*lambda_i+onee[coord][j][i]*lambda_j
+
+    s = s0 + s1
+
+    return s
+
+
+def get_x0(mol, thresh: float = 1e-14):
 
     r"""Calculates canonical basis orthogonalisation matrix x, defined by:
 
@@ -23,6 +49,40 @@ def get_x(mol, thresh: float = 1e-14):
 
     omega = np.identity(2)
     spatial_overlap_s = mol.intor('int1e_ovlp')
+    overlap_s = np.kron(omega, spatial_overlap_s)
+
+    assert np.allclose(overlap_s, overlap_s.T.conj(), rtol=0, atol=thresh)
+    s_eig, mat_u = np.linalg.eigh(overlap_s)
+    overlap_indices = np.where(np.abs(s_eig) > thresh)[0]
+    s_eig = s_eig[overlap_indices]
+    mat_u = mat_u[:, overlap_indices]
+    s_s = np.diag(1.0/s_eig)**0.5
+    mat_x = np.dot(mat_u, s_s)
+
+    return mat_x
+
+
+def get_x(mol, atom, coord, thresh: float = 1e-14):
+
+    r"""Calculates canonical basis orthogonalisation matrix x, defined by:
+
+    .. math::
+
+        \mathbf{X}=\mathbf{Us^{-\frac{1}{2}}}}
+
+    where U is the matrix of eigenvectors of s_ao, and
+    :math:'s^{-\frac{1}{2}}}' is the diagonal matrix of inverse square root
+    eigenvalues of s_ao.
+
+    :param s_ao: atomic orbital overlap matrix
+    :param thresh: Threshold to consider an eigenvalue of the AO overlap
+            as zero.
+
+    :returns: the orthogonalisation matrix x
+    """
+
+    omega = np.identity(2)
+    spatial_overlap_s = get_s(mol, atom, coord)
     overlap_s = np.kron(omega, spatial_overlap_s)
 
     assert np.allclose(overlap_s, overlap_s.T.conj(), rtol=0, atol=thresh)
@@ -312,56 +372,74 @@ def get_p1_ortho(g0, f0, f1, nelec, complexsymmetric: bool, mol):
             If :const:'False', :math:'\diamond = \hat{e}'.
     :param mol: Molecule class as defined by PySCF.
 
-    :returns: The first order fock matrix, from which the perturbed energy can
-            be obtained.
+    :returns: The first order density matrix, from which the perturbed energy
+            can be obtained.
     """
 
     x = get_x(mol)
-    eta0 = np.sort(np.linalg.eigvals(f0))
-    nbasis = len(g0)
+    f0_ortho = np.linalg.multi_dot([x.T.conj(), f0, x])
+    eta0, g0_ortho = np.linalg.eig(f0_ortho)
+    index = np.argsort(eta0)
+    eta0 = eta0[index]
+    g0_ortho = g0_ortho[:, index]
+    print("eta0:\n", eta0)
+    print("g0_ortho:\n", g0_ortho)
+    nbasis = f0.shape[1]
     nocc = nelec
     nvir = nbasis - nelec
 
+
     if not complexsymmetric:
 
-        g0_ortho = np.dot(np.linalg.inv(x), g0)
-        assert np.allclose(np.fill_diagonal(np.dot(g0_ortho.T.conj(),
-                                                   g0_ortho),
-                                            0),
-                           np.zeros(len(g0)),
+        # g0_ortho = np.dot(np.linalg.inv(x), g0)
+        g0_zeros = np.dot(g0_ortho.T.conj(), g0_ortho)
+        np.fill_diagonal(g0_zeros, 0)
+
+        assert np.allclose(g0_zeros, np.zeros_like(g0_zeros),
                            rtol=0,
-                           atol=1e-14)
+                           atol=1e-10)
 
         f1_ortho = np.linalg.multi_dot([x.T.conj(), f1, x])
-        assert np.allclose(np.fill_diagonal(np.dot(f1_ortho.T.conj(),
-                                                   f1_ortho),
-                                            0),
-                           np.zeros(len(f1)),
+        f1_zeros = np.dot(f1_ortho.T.conj(), f1_ortho)
+        np.fill_diagonal(f1_zeros, 0)
+
+
+        assert np.allclose(f1_zeros, np.zeros_like(f1_zeros),
                            rtol=0,
-                           atol=1e-14)
+                           atol=1e-10)
 
         y = np.zeros((nbasis, nbasis))
 
         for i in range(nocc):
             for j in range(nvir):
 
-                y += ((1/(eta0[i] - eta0[nocc+j]))
-                      * np.linalg.multi_dot([np.outer(g0_ortho[:,i],
-                                                      g0_ortho.T.conj()[:,i]),
-                                            f1_ortho,
-                                            np.outer(g0_ortho[:,nocc+j],
-                                                     g0_ortho.T.conj()[:,
-                                                                       nocc+j]
-                )]))
+                p0_occ = np.outer(g0_ortho[:,i], g0_ortho[:,i].conj())
 
+                p0_vir = np.outer(g0_ortho[:,nocc+j],
+                                  g0_ortho[:,nocc+j].conj())
+
+                eta0_inv = 1/(eta0[i] - eta0[nocc+j])
+                yij = eta0_inv*np.linalg.multi_dot([p0_occ,f1_ortho,p0_vir])
+
+                y += yij
+
+                # print("(i,j) = (",i,",",j,")")
+                # print("eta0_inv:\n", eta0_inv)
+                # print("g0_ortho:\n", g0_ortho)
+                # print("p0_occ:\n", p0_occ)
+                # print("f1_ortho:\n", f1_ortho)
+                # print("p0_vir:\n", p0_vir)
+                # print("total contribution:\n", yij)
+
+        print("y :\n", y)
         p1_ortho = y + y.T.conj()
 
-        assert np.allclose(np.fill_diagonal(np.dot(p1_ortho.T.conj(),
-                                                   p1_ortho),
-                                            0),
-                           np.zeros(len(p1)),
+        p1_ortho_zeros = np.dot(p1_ortho.T.conj(), p1_ortho)
+        np.fill_diagonal(p1_ortho_zeros, 0)
+
+        assert np.allclose(p1_ortho_zeros, np.zeros_like(p1_ortho_zeros),
                            rtol=0,
-                           atol=1e-14)
+                           atol=1e-10)
 
     else:
 
@@ -388,10 +466,10 @@ def get_p1_ortho(g0, f0, f1, nelec, complexsymmetric: bool, mol):
 
                 y += ((1/(eta0[i] - eta0[nocc+j]))
                       * np.linalg.multi_dot([np.outer(g0_ortho[:,i],
-                                                      g0_ortho.T[:,i]),
+                                                      g0_ortho[:,i]),
                                             f1_ortho,
                                             np.outer(g0_ortho[:,nocc+j],
-                                                     g0_ortho.T[:,
+                                                     g0_ortho[:,
                                                                 nocc+j]
                 )]))
 
@@ -454,13 +532,16 @@ def p1_iteration(p1_guess, mol, g0, p0, atom, coord, nelec,
         f1 = get_f1(pi0, p0, hcore1, pi1, p1)
 
         p1_ortho = get_p1_ortho(g0, f0, f1, nelec, complexsymmetric, mol)
-
+        print("\n", p1_ortho, "\n")
+        print(p1)
         p1_last = p1
         p1 = np.linalg.multi_dot([x, p1_ortho, x.T.conj()])
 
         delta_p1 = np.max(np.abs(p1 - p1_last))
 
-    return p1, iter_num
+    print("Number of iterations:\n", iter_num)
+
+    return p1
 
 
 def get_e0_nuc(mol):
