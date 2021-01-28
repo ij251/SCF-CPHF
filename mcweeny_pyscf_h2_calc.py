@@ -2,7 +2,7 @@ import numpy as np
 from pyscf import gto, scf, grad
 from CPHFfunctions import get_p0, get_hcore0, get_pi0, get_f0, get_hcore1,\
 get_pi1, get_f1, get_p1_ortho, p1_iteration, get_e1_elec, get_e0_elec, get_x,\
-get_e0_nuc, get_e1_nuc, get_s
+get_e0_nuc, get_e1_nuc, get_s, get_x0
 
 
 test_mol = gto.M(
@@ -49,6 +49,7 @@ hcore0 = get_hcore0(test_mol)
 pi0 = get_pi0(test_mol)
 f0 = get_f0(get_hcore0(test_mol), get_pi0(test_mol), p0)
 f0_ortho = np.linalg.multi_dot([x0.T.conj(), f0, x0])
+print("f0_ortho is:\n", f0_ortho)
 e0_nuc = get_e0_nuc(test_mol)
 e0_elec = get_e0_elec(test_mol, p0)
 #print("Canonical orthogonalisation matrix x0:\n", x0)

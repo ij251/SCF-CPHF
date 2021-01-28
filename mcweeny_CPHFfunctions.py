@@ -345,7 +345,7 @@ def get_f1(pi0, p0, hcore1, pi1, p1):
     return f1
 
 
-def get_p1_ortho(g0, f0, f1, nelec, complexsymmetric: bool, mol):
+def get_p1_ortho(g0, f0, f1, nelec, complexsymmetric: bool, mol, atom, coord):
 
     r"""Orthogonalises relevant quantities then calculates the orthogonal
     first order density matrix containing information about how the molecular
@@ -376,8 +376,9 @@ def get_p1_ortho(g0, f0, f1, nelec, complexsymmetric: bool, mol):
             can be obtained.
     """
 
-    x = get_x(mol)
-    f0_ortho = np.linalg.multi_dot([x.T.conj(), f0, x])
+    x0 = get_x0(mol)
+    x = get_x(mol, atom, coord)
+    f0_ortho = np.linalg.multi_dot([x0.T.conj(), f0, x0])
     eta0, g0_ortho = np.linalg.eig(f0_ortho)
     index = np.argsort(eta0)
     eta0 = eta0[index]
@@ -399,7 +400,9 @@ def get_p1_ortho(g0, f0, f1, nelec, complexsymmetric: bool, mol):
                            rtol=0,
                            atol=1e-10)
 
-        f1_ortho = np.linalg.multi_dot([x.T.conj(), f1, x])
+        f = f0 + f1
+        f_ortho = np.linalg.multi_dot([x.T.conj(), f, x])
+        f1_ortho = f_ortho - f0_ortho
         f1_zeros = np.dot(f1_ortho.T.conj(), f1_ortho)
         np.fill_diagonal(f1_zeros, 0)
 
@@ -514,12 +517,16 @@ def p1_iteration(p1_guess, mol, g0, p0, atom, coord, nelec,
     :returns: The converged first order density matrix.
     """
 
-    x = get_x(mol)
+    x0 = get_x0(mol)
+    x0_inv = np.linalg.inv(x0)
+    x = get_x(mol, atom, coord)
     hcore0 = get_hcore0(mol)
     pi0 = get_pi0(mol)
     f0 = get_f0(hcore0, pi0, p0)
     hcore1 = get_hcore1(mol, atom, coord)
     pi1 = get_pi1(mol, atom, coord)
+
+    p0_ortho = np.linalg.multi_dot([x0_inv, p0, x0_inv.T.conj()])
 
     p1 = p1_guess
     delta_p1 = 1
@@ -531,11 +538,14 @@ def p1_iteration(p1_guess, mol, g0, p0, atom, coord, nelec,
 
         f1 = get_f1(pi0, p0, hcore1, pi1, p1)
 
-        p1_ortho = get_p1_ortho(g0, f0, f1, nelec, complexsymmetric, mol)
-        print("\n", p1_ortho, "\n")
-        print(p1)
+        p1_ortho = get_p1_ortho(g0, f0, f1, nelec, complexsymmetric, mol,
+                                atom, coord)
+        # print("\n", p1_ortho, "\n")
+        # print(p1)
         p1_last = p1
-        p1 = np.linalg.multi_dot([x, p1_ortho, x.T.conj()])
+        p_ortho = p0_ortho + p1_ortho
+        p = np.linalg.multi_dot([x, p1_ortho, x.T.conj()])
+        p1 = p - p0
 
         delta_p1 = np.max(np.abs(p1 - p1_last))
 
