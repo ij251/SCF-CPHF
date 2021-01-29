@@ -1,5 +1,6 @@
 from pyscf import gto, scf, grad
 import numpy as np
+import time
 
 def make_ghf(g0_rhf, nelec):
 
@@ -53,7 +54,7 @@ def get_s1(mol, atom, coord):
     """
 
     s0 = mol.intor("int1e_ovlp")
-    onee = mol.intor("int1e_ipovlp")
+    onee = -mol.intor("int1e_ipovlp") #minus sign due to pyscf definition
     s1 = np.zeros_like(s0)
 
     for i in range(s0.shape[1]):
@@ -211,7 +212,6 @@ def get_pi0(mol):
     omega = np.identity(2)
     spin_j = np.einsum("ij,kl->ikjl", omega, omega)
     j = np.kron(spin_j, phys_spatial_j)
-    # j = phys_spatial_j
     k = np.einsum("ijkl->ijlk", j)
     pi0 = j - k
 
@@ -324,7 +324,7 @@ def get_pi1(mol, atom, coord):
     omega = np.identity(2)
     spin_j = np.einsum("ij,kl->ikjl", omega, omega)
 
-    twoe = mol.intor("int2e_ip1")[coord]
+    twoe = -mol.intor("int2e_ip1")[coord] #minus sign due to pyscf definition
 
     j1_spatial = np.zeros((twoe.shape[0],twoe.shape[0],twoe.shape[0],
                            twoe.shape[0]))
@@ -356,13 +356,9 @@ def get_pi1(mol, atom, coord):
 
     j1_spatial = np.einsum("abcd->acbd", j1_spatial) #convert to physicists
     j1 = np.kron(spin_j, j1_spatial)
-    # j1 = j1_spatial
     k1 = np.einsum("ijkl->ijlk", j1) #physicists notation
-    # k1 = np.einsum("ijkl->ikjl", j1) #chemists notation
 
     pi1 = j1 - k1
-    # print("twoe:\n", twoe)
-    # print("pi1:\n", pi1)
 
     return pi1
 
@@ -421,20 +417,15 @@ def get_g1_x(f1_x, s1_x, eta0, nelec):
 
     for i in range(nocc, nbasis):
         for j in range(nocc):
-            delta_eta0 = eta0[j] - eta0[i]
 
+            delta_eta0 = eta0[j] - eta0[i]
             g1_x[i,j] = (f1_x[i,j] - eta0[j]*s1_x[i,j])/delta_eta0
 
-            "printing"
-            # print(i,j)
-            # print(delta_eta0)
-            # print(g1_x[i,j])
 
     for j in range(nbasis):
 
         g1_x[j,j] = -0.5*s1_x[j,j]
 
-    # print(g1_x)
     return g1_x
 
 
@@ -472,12 +463,14 @@ def g1_iteration(complexsymmetric: bool, mol, g0, x, atom, coord, nelec,
     g0_x = np.dot(np.linalg.inv(x), g0)
     p0 = get_p0(g0, complexsymmetric, nelec)
     p0_x = np.linalg.multi_dot([x.T.conj(), p0, x])
+
     hcore0 = get_hcore0(mol)
     pi0 = get_pi0(mol)
     pi0_x = np.einsum("pi,ijkl,jr,kq,sl->prqs",
                       x.T.conj(), pi0, x, x, x.T.conj())
     f0 = get_f0(hcore0, pi0, p0)
     f0_x = np.linalg.multi_dot([x.T.conj(), f0, x])
+
     eta0 = np.linalg.eig(f0_x)[0]
     index = np.argsort(eta0)
     eta0 = eta0[index]
@@ -502,10 +495,6 @@ def g1_iteration(complexsymmetric: bool, mol, g0, x, atom, coord, nelec,
         g1_x = get_g1_x(f1_x, s1_x, eta0, nelec)
         delta_g1_x = np.max(np.abs(g1_x - g1_x_last))
 
-    # print("f1_x:\n", f1_x)
-    # print("s1_x:\n", s1_x)
-    # print("g1_x:\n", g1_x)
-    # print("Number of iterations:\n", iter_num)
     g1 = np.dot(x, g1_x)
 
     return g1
@@ -690,17 +679,6 @@ def get_e1_elec(mol, g0, g1, atom, coord, complexsymmetric: bool, nelec):
     e1_elec_2e = (np.einsum("ij,ij->",f0_prime_2e, p1)
                   + np.einsum("ij,ij->",f1_prime_2e, p0))
 
-    # print(np.einsum("ij,ij->",f0_prime_2e, p1))
-    # print(np.einsum("ij,ij->",f1_prime_2e, p0))
-    # assert False
     e1_elec = e1_elec_1e + e1_elec_2e
-
-    # print("########################")
-    # print("1 electron e1_elec:\n", e1_elec_1e)
-    # print("2 electron e1_elec:\n", e1_elec_2e)
-    # print("total e1_elec:\n", e1_elec)
-    # print("Nuclear repulsion e1_nuc:\n", get_e1_nuc(mol, atom, coord))
-    # print("Total e1:\n", get_e1_nuc(mol, atom, coord) + e1_elec)
-    # print("########################")
 
     return e1_elec, e1_elec_1e, e1_elec_2e

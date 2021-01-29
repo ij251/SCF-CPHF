@@ -25,9 +25,10 @@ h2_mol_b = gto.M(
         spin = 0)
 
 h2_nelec = 2
-h2_atom = 0
+h2_atom = 1
 h2_coord = 2
-
+m = scf.RHF(h2_mol_a)
+print(h2_mol_a.ao_labels())
 
 h3_mol_a = gto.M(
         atom = (
@@ -117,7 +118,7 @@ def compare_pyscf(mol_a, mol_b, nelec, atom, coord):
 
     print("s0 difference:\n", s0_b - s0_a)
     print("hcore0 difference:\n", hcore0_b - hcore0_a)
-    # print("spatial_j difference:\n", spatial_j_b - spatial_j_a)
+    print("spatial_j difference:\n", spatial_j_b - spatial_j_a)
 
     print("\n###############################################################")
     print("My quantities * pertubation distance")
@@ -129,7 +130,7 @@ def compare_pyscf(mol_a, mol_b, nelec, atom, coord):
 
     print("s1:\n", s1*0.05)
     print("hcore1:\n", hcore1*0.05)
-    # print("j1_spatial:\n", j1_spatial*0.05)
+    print("j1_spatial:\n", j1_spatial*0.05)
 
     print("\n###############################################################")
     print("Difference between my first order objects and pyscf (expect zero)")
@@ -140,7 +141,7 @@ def compare_pyscf(mol_a, mol_b, nelec, atom, coord):
     delta_j1_spatial = abs(spatial_j_b - spatial_j_a) - abs(j1_spatial*0.05)
     print("s1 difference:\n", delta_s1)
     print("hcore1 difference:\n", delta_hcore1)
-    # print("spatial_j1 difference:\n", delta_j1_spatial)
+    print("spatial_j1 difference:\n", delta_j1_spatial)
     if np.allclose(delta_s1, np.zeros_like(delta_s1),
                    rtol=0, atol=1e-3):
         print("Change in overlap matches to first order")
@@ -152,7 +153,7 @@ def compare_pyscf(mol_a, mol_b, nelec, atom, coord):
         print("Change in j1_spatial matches to first order")
 
 
-def compare_pyscf_energy(mol):
+def compare_pyscf_energy(mol_a, mol_b):
 
     print("Total energy difference:\n", scf.hf.energy_tot(mol_b)
                                         - scf.hf.energy_tot(mol_a))

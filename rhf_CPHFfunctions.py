@@ -53,7 +53,7 @@ def get_s1(mol, atom, coord):
     """
 
     s0 = mol.intor("int1e_ovlp")
-    onee = mol.intor("int1e_ipovlp")
+    onee = -mol.intor("int1e_ipovlp") #minus from pyscf definition
     s1 = np.zeros_like(s0)
 
     for i in range(s0.shape[1]):
@@ -324,7 +324,7 @@ def get_pi1(mol, atom, coord):
     omega = np.identity(2)
     spin_j = np.einsum("ij,kl->ikjl", omega, omega)
 
-    twoe = mol.intor("int2e_ip1")[coord]
+    twoe = -mol.intor("int2e_ip1")[coord] #minus sign from pyscf definition
 
     j1_spatial = np.zeros((twoe.shape[0],twoe.shape[0],twoe.shape[0],
                            twoe.shape[0]))

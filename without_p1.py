@@ -13,12 +13,25 @@ mol = gto.M(
         unit = 'Bohr',
         charge = 0,
         spin = 0)
+nelec = 2
+atom = 1
+coord = 2
+
+# mol = gto.M(
+#         atom = (
+#             f"O 0 0 0;"
+#             f"H 0 0 1;"
+#         ),
+#         basis = 'sto-3g',
+#         unit = 'Bohr',
+#         charge = -1,
+#         )
+# nelec = 10
+# atom = 1
+# coord = 2
 
 m = scf.RHF(mol)
 m.kernel()
-nelec = 2
-atom = 0
-coord = 2
 g0 = m.mo_coeff
 # g0 = make_ghf(m.mo_coeff, nelec)
 
@@ -34,6 +47,7 @@ def get_pe0(g0, nelec, mol):
     f0 = get_f0(hcore0, pi0, p0)
     f0_x = np.linalg.multi_dot([x.T.conj(), f0, x])
     eta0 = np.linalg.eig(f0_x)[0]
+    print(eta0)
     index = np.argsort(eta0)
     eta0 = eta0[index]
 
@@ -64,11 +78,17 @@ def get_e1_without_p1(g0, mol, atom, coord, nelec):
     pe0 = get_pe0(g0, nelec, mol)
 
     e1 = 0
+    blah = 0
+    bleh = 0
+    bluh = 0
 
     for p in range(g0.shape[1]):
         for q in range(g0.shape[1]):
 
-            e1 += 2*(p0[p,q]*1*hcore1[p,q] - pe0[p,q]*s1[p,q])
+            e1 += 2*(p0[p,q]*1*hcore1[p,q])
+            e1 -= 2*(pe0[p,q]*s1[p,q])
+            blah += 2*(p0[p,q]*1*hcore1[p,q])
+            bleh += 2*(pe0[p,q]*1*s1[p,q])
             # print("One electron:\n",
                   # 2*(p0[p,q]*1*hcore1[p,q] - pe0[p,q]*s1[p,q]))
 
@@ -76,8 +96,13 @@ def get_e1_without_p1(g0, mol, atom, coord, nelec):
                 for s in range(g0.shape[1]):
 
                     e1 += (2*p0[p,q]*p0[r,s] - p0[p,r]*p0[q,s])*pi1[p,q,r,s]
+                    bluh += (2*p0[p,q]*p0[r,s] - p0[p,r]*p0[q,s])*pi1[p,q,r,s]
                     # print("two electron:\n",
                           # (2*p0[p,q]*p0[r,s] - p0[p,r]*p0[q,s])*pi1[p,q,r,s])
+    print(blah)
+    print(bluh)
+    print(bleh)
+    print(e1)
 
     return e1
 
