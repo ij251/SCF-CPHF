@@ -9,7 +9,7 @@ mol = gto.M(
             f"H 0 0 0;"
             f"H 0 0 1;"
         ),
-        basis = 'sto-3g',
+        basis = '6-31g',
         unit = 'Bohr',
         charge = 0,
         spin = 0)

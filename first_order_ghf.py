@@ -1,36 +1,7 @@
 from pyscf import gto, scf, grad
 import numpy as np
-import time
-
-def make_ghf(g0_rhf, nelec):
-
-    r"""Calculates the GHF MO coefficient matrix from the RHF, organised in
-    blocks of occupied then virtual orbitals.
-
-    :param g0_rhf: RHF MO coefficient matrix.
-    :param nelec: Number of electrons in the molecule, determines the number
-            of occupied orbitals.
-
-    :returns: GHF MO coefficient matrix.
-    """
-
-    nbasis = g0_rhf.shape[1]
-
-    if nelec % 2 == 0:
-        nocc = int(nelec/2)
-    else:
-        nocc = int((nelec+1)/2)
-
-    g0_ghf = np.block([[g0_rhf[:, 0:nocc],
-                        np.zeros_like(g0_rhf[:, 0:nocc]),
-                        g0_rhf[:, nocc:nbasis],
-                        np.zeros_like(g0_rhf[:, nocc:nbasis])],
-                       [np.zeros_like(g0_rhf[:, 0:nocc]),
-                        g0_rhf[:, 0:nocc],
-                        np.zeros_like(g0_rhf[:, nocc:nbasis]),
-                        g0_rhf[:, nocc:nbasis]]])
-
-    return g0_ghf
+from zeroth_order_ghf import rhf_to_ghf, get_p0, get_hcore0, get_pi0, get_f0,\
+get_e0_nuc, get_e0_elec
 
 def get_s1(mol, atom, coord):
 
@@ -75,64 +46,6 @@ def get_s1(mol, atom, coord):
     return s1
 
 
-def get_x_lowdin(mol, thresh: float = 1e-14):
-
-    r"""Calculates canonical basis orthogonalisation matrix x, defined by:
-
-    .. math::
-
-        \mathbf{X}=\mathbf{Us^{-\frac{1}{2}}}}
-
-    where U is the matrix of eigenvectors of s_ao, and
-    :math:'s^{-\frac{1}{2}}}' is the diagonal matrix of inverse square root
-    eigenvalues of s_ao.
-
-    :param s_ao: atomic orbital overlap matrix
-    :param thresh: Threshold to consider an eigenvalue of the AO overlap
-            as zero.
-
-    :returns: the orthogonalisation matrix x
-    """
-
-    omega = np.identity(2)
-    spatial_overlap_s = mol.intor('int1e_ovlp')
-    overlap_s = np.kron(omega, spatial_overlap_s)
-
-    assert np.allclose(overlap_s, overlap_s.T.conj(), rtol=0, atol=thresh)
-    s_eig, mat_u = np.linalg.eigh(overlap_s)
-    overlap_indices = np.where(np.abs(s_eig) > thresh)[0]
-    s_eig = s_eig[overlap_indices]
-    mat_u = mat_u[:, overlap_indices]
-    s_s = np.diag(1.0/s_eig)**0.5
-    mat_x = np.dot(mat_u, s_s)
-
-    return mat_x
-
-
-def get_p0(g0, complexsymmetric: bool, nelec):
-
-    r"""Calculates the zeroth order density matrix from the zeroth order
-    coefficient matrix. It is defined by (only over occupied MOs):
-
-    .. math::
-
-        \mathbf{P^{(0)}}=\mathbf{G^{(0)}G^{(0)\dagger\diamond}}
-
-    :param g0: zeroth order GHF coefficient matrix.
-    :param complexsymmetric: If :const:'True', :math:'/diamond = /star'.
-            If :const:'False', :math:'\diamond = \hat{e}'.
-
-    :returns: The zeroth order density matrix.
-    """
-
-    if not complexsymmetric:
-        p0 = np.dot(g0[:,0:nelec], g0[:,0:nelec].T.conj())
-    else:
-        p0 = np.dot(g0[:,0:nelec], g0[:,0:nelec].T)
-
-    return p0
-
-
 def get_p1(g0, g1, complexsymmetric, nelec):
 
     r"""Calculates the first order density matrix from the zeroth and first
@@ -163,83 +76,6 @@ def get_p1(g0, g1, complexsymmetric, nelec):
 
 
     return p1
-
-
-def get_hcore0(mol):
-
-    r"""Calculates The zeroth order core hamiltonian.
-    Each element is given by:
-
-    .. math::
-
-        \left(\mathbf{H_{core}^{(0)}}\right)_{\mu\nu}
-        =\left(\phi_{\mu}\left|\mathbf{\hat{H}_{core}}\right|\phi_{\nu}\right)
-
-    :param mol: The class for a molecule as defined by PySCF.
-
-    :returns: The zeroth order core hamiltonian matrix.
-    """
-
-    hcore0 = (mol.intor('int1e_nuc')
-              + mol.intor('int1e_kin'))
-
-    omega = np.identity(2)
-    hcore0 =  np.kron(omega, hcore0)
-
-    return hcore0
-
-
-def get_pi0(mol):
-
-    r"""Calculate the 4 dimensional zeroth order Pi tensor.
-    Each element is given by:
-
-    .. math::
-
-        \mathbf{\Pi_{\delta'\mu',\epsilon'\nu',\delta\mu,\epsilon\nu}^{(0)}}
-        = \mathbf{\Omega_{\delta'\delta}\Omega_{\epsilon'\epsilon}}
-          \left(\mu'\mu|\nu'\nu\right)
-        - \mathbf{\Omega_{\delta'\epsilon}\Omega_{\epsilon'\delta}}
-          \left(\mu'\nu|\nu'\mu\right)
-
-    :param mol: The class for a molecule as defined by PySCF.
-
-    :returns: The zeroth order Pi tensor.
-    """
-
-    spatial_j = mol.intor('int2e')
-    phys_spatial_j = np.einsum("abcd->acbd", spatial_j)
-    omega = np.identity(2)
-    spin_j = np.einsum("ij,kl->ikjl", omega, omega)
-    j = np.kron(spin_j, phys_spatial_j)
-    k = np.einsum("ijkl->ijlk", j)
-    pi0 = j - k
-
-    return pi0
-
-
-def get_f0(hcore0, pi0, p0):
-
-    r"""Calculates the zeroth order fock matrix, defined by:
-
-    .. math::
-
-        \mathbf{F^{(0)}}
-        =\mathbf{H_{core}^{(0)}}
-        +\mathbf{\Pi^{(0)}}\cdot\mathbf{P^{(0)}}
-
-    :param hcore0: Zeroth order core hamiltonian matrix.
-    :param pi0: Zeroth order 4 dimensional Pi tensor.
-    :param p0: Zeroth order density matrix.
-
-    :returns: The zeroth order fock matrix
-    """
-
-    f0_1e = hcore0
-    f0_2e = np.einsum("ijkl,jl->ik", pi0, p0)
-    f0 = f0_1e + f0_2e
-
-    return f0
 
 
 def get_hcore1(mol, atom, coord):
@@ -420,6 +256,8 @@ def get_g1_x(f1_x, s1_x, eta0, nelec):
 
             delta_eta0 = eta0[j] - eta0[i]
             g1_x[i,j] = (f1_x[i,j] - eta0[j]*s1_x[i,j])/delta_eta0
+            # print(i, j)
+            # print("delta_eta0:\n", delta_eta0)
 
 
     for j in range(nbasis):
@@ -429,15 +267,15 @@ def get_g1_x(f1_x, s1_x, eta0, nelec):
     return g1_x
 
 
-def g1_iteration(complexsymmetric: bool, mol, g0, x, atom, coord, nelec,
-                 g1_x_guess):
+def g1_iteration(complexsymmetric: bool, mol, atom, coord, nelec):
 
     r"""Calculates the first order coefficient matrix self consistently given
     that :math:'\mathbf{G^{(1)}}' and :math:'\mathbf{F^{(1)}}' depend on one
     another.
 
     :param complexsymmetric: If :const:'True', :math:'/diamond = /star'.
-            If :const:'False', :math:'\diamond = \hat{e}'.
+            If :const:'False', :math:'\diamond = \hat{e}'. Used here
+            when transforming quantities using the X matrix.
     :param mol: Molecule class as defined by PySCF.
     :param g0: Matrix of zeroth order molecular orbital coefficients
     :param atom: Input for which atom is being perturbed, with atoms numbered
@@ -449,38 +287,60 @@ def g1_iteration(complexsymmetric: bool, mol, g0, x, atom, coord, nelec,
                     '2' for z
     :param nelec: The number of electrons in the molecule, determines which
             orbitals are occupied and virtual.
-    :param p1_guess: An initial guess for the first order coefficient matrix,
-            a matrix of zeros seems to work well for now, perhaps due to the
-            pertubation being necessarily small, and other guesses converge to
-            the same matrix.
 
     :returns: The converged first order coefficient matrix.
     """
 
+    m = scf.RHF(mol)
+    m.verbose = 0
+    m.kernel()
+    g0_rhf = m.mo_coeff
+    g0 = rhf_to_ghf(g0_rhf, nelec)
+
+    x = g0
     s1 = get_s1(mol, atom, coord)
-    s1_x = np.linalg.multi_dot([x.T.conj(), s1, x])
-
-    g0_x = np.dot(np.linalg.inv(x), g0)
     p0 = get_p0(g0, complexsymmetric, nelec)
-    p0_x = np.linalg.multi_dot([x.T.conj(), p0, x])
-
     hcore0 = get_hcore0(mol)
     pi0 = get_pi0(mol)
-    pi0_x = np.einsum("pi,ijkl,jr,kq,sl->prqs",
-                      x.T.conj(), pi0, x, x, x.T.conj())
     f0 = get_f0(hcore0, pi0, p0)
-    f0_x = np.linalg.multi_dot([x.T.conj(), f0, x])
-
-    eta0 = np.linalg.eig(f0_x)[0]
-    index = np.argsort(eta0)
-    eta0 = eta0[index]
 
     hcore1 = get_hcore1(mol, atom, coord)
-    hcore1_x = np.linalg.multi_dot([x.T.conj(), hcore1, x])
     pi1 = get_pi1(mol, atom, coord)
-    pi1_x = np.einsum("pi,ijkl,jr,kq,sl->prqs",
-                      x.T.conj(), pi1, x, x, x.T.conj())
 
+    if not complexsymmetric:
+
+        p0_x = np.linalg.multi_dot([x.T.conj(), p0, x])
+        s1_x = np.linalg.multi_dot([x.T.conj(), s1, x])
+        f0_x = np.linalg.multi_dot([x.T.conj(), f0, x])
+        pi0_x = np.einsum("pi,ijkl,jr,kq,sl->prqs",
+                          x.T.conj(), pi0, x, x, x.T.conj(),
+                          optimize = 'optimal')
+
+        hcore1_x = np.linalg.multi_dot([x.T.conj(), hcore1, x])
+        pi1_x = np.einsum("pi,ijkl,jr,kq,sl->prqs",
+                          x.T.conj(), pi1, x, x, x.T.conj(),
+                          optimize = 'optimal')
+
+    else:
+
+        p0_x = np.linalg.multi_dot([x.T, p0, x])
+        s1_x = np.linalg.multi_dot([x.T, s1, x])
+        f0_x = np.linalg.multi_dot([x.T, f0, x])
+        pi0_x = np.einsum("pi,ijkl,jr,kq,sl->prqs",
+                          x.T, pi0, x, x, x.T,
+                          optimize = 'optimal')
+
+        hcore1_x = np.linalg.multi_dot([x.T, hcore1, x])
+        pi1_x = np.einsum("pi,ijkl,jr,kq,sl->prqs",
+                          x.T, pi1, x, x, x.T,
+                          optimize = 'optimal')
+
+    eta0, g0_x = np.linalg.eig(f0_x)
+    index = np.argsort(eta0)
+    eta0 = eta0[index]
+    g0_x = g0_x[:, index] #Order g0 columns according to eigenvalues
+
+    g1_x_guess = np.zeros_like(g0)
     g1_x = g1_x_guess
     iter_num = 0
     delta_g1_x = 1
@@ -498,37 +358,6 @@ def g1_iteration(complexsymmetric: bool, mol, g0, x, atom, coord, nelec,
     g1 = np.dot(x, g1_x)
 
     return g1
-
-
-def get_e0_nuc(mol):
-
-    r"""Calculates the zeroth order nuclear repulsion energy.
-    This is given by the following expression, where N is the total number of
-    nuclei in the system, A and B are nuclear indices, Z is the atomic number,
-    and R_{AB} is the distance between nucei A and B:
-
-    .. math::
-
-        E^{(0)}_{nuc} = \sum\limits_{A>B}^N\frac{Z_AZ_B}{R_{AB}}
-
-    :param mol: The pyscf molecule class, from which the nuclear coordinates
-            and atomic numbers are taken.
-
-    :returns: The zeroth order nuclear repulsion energy.
-    """
-
-    e0_nuc = 0
-
-    for a in range(len(mol.atom_charges())):
-        for b in range(a+1, len(mol.atom_charges())):
-
-            r_ab2 = np.dot(mol.atom_coord(a) - mol.atom_coord(b),
-                           mol.atom_coord(a) - mol.atom_coord(b))
-            r_ab = np.sqrt(r_ab2)
-
-            e0_nuc += (mol.atom_charge(a) * mol.atom_charge(b)) / r_ab
-
-    return e0_nuc
 
 
 def get_e1_nuc(mol, atom, coord):
@@ -576,46 +405,7 @@ def get_e1_nuc(mol, atom, coord):
     return e1_nuc
 
 
-def get_e0_elec(mol, g0):
-
-    r"""Calculates the zeroth order electronic energy.
-    This is a contraction of the zeroth order density matrix with zeroth order
-    core hamiltonian and pi tensors:
-
-    .. math::
-
-        E^{(0)}_{elec} = Tr\left(\mathbf{F'}^{(0)}\mathbf{P}^{(0)}\right)
-
-    where
-
-    .. math::
-
-        \mathbf{F'}^{(0)} = \mathbf{H_{core}^{(0)}}
-        + \frac{1}{2}\mathbf{\Pi^{(0)}}\cdot\mathbf{P^{(0)}}
-
-    :param mol: The pyscf molecule class, from which the nuclear coordinates
-            and atomic numbers are taken.
-    :param g0: The zeroth order coefficient matrix.
-
-    :returns: The zeroth order Hartree Fock electronic energy
-    """
-
-    p0 = get_p0(g0, complexsymmetric, nelec)
-    hcore0 = get_hcore0(mol)
-    pi0 = get_pi0(mol)
-
-    f0_prime_1e = hcore0
-    f0_prime_2e = 0.5 * np.einsum("ijkl,jl->ik", pi0, p0)
-
-    e0_elec_1e = np.trace(np.dot(f0_prime_1e, p0))
-    e0_elec_2e = np.trace(np.dot(f0_prime_2e, p0))
-
-    e0_elec = e0_elec_1e + e0_elec_2e
-
-    return e0_elec
-
-
-def get_e1_elec(mol, g0, g1, atom, coord, complexsymmetric: bool, nelec):
+def get_e1_elec(mol, g1, atom, coord, complexsymmetric: bool, nelec):
 
     r"""Calculates the first order electronic energy.
     Defined as follows:
@@ -659,6 +449,12 @@ def get_e1_elec(mol, g0, g1, atom, coord, complexsymmetric: bool, nelec):
     :returns: The first order electronic energy
     """
 
+    m = scf.RHF(mol)
+    m.verbose = 0
+    m.kernel()
+    g0_rhf = m.mo_coeff
+    g0 = rhf_to_ghf(g0_rhf, nelec)
+
     p0 = get_p0(g0, complexsymmetric, nelec)
     p1 = get_p1(g0, g1, complexsymmetric, nelec)
 
@@ -681,4 +477,92 @@ def get_e1_elec(mol, g0, g1, atom, coord, complexsymmetric: bool, nelec):
 
     e1_elec = e1_elec_1e + e1_elec_2e
 
-    return e1_elec, e1_elec_1e, e1_elec_2e
+    return e1_elec
+
+
+def write_e1_mat(mol, nelec, complexsymmetric):
+
+    r"""Writes matrix of ghf energy derivatives for each atom and coordinate.
+
+    :param mol: PySCF molecule object.
+    :param nelec: The number of electrons in the molecule, determines which
+            orbitals are occupied and virtual.
+    :param complexsymmetric: If :const:'True', :math:'/diamond = /star'.
+            If :const:'False', :math:'\diamond = \hat{e}'.
+
+    :returns: natom x 3 matrix of ghf energy derivatives.
+    """
+
+    e1_mat = np.zeros((mol.natm, 3))
+    for i in range(mol.natm):
+        for j in range(3):
+
+            atom = i
+            coord = j
+            g1 = g1_iteration(complexsymmetric, mol, i, j, nelec)
+            e1_elec = get_e1_elec(mol, g1, i, j, complexsymmetric, nelec)
+            e1_nuc = get_e1_nuc(mol, i, j)
+            e1 = e1_elec + e1_nuc
+
+            e1_mat[i,j] += e1
+
+    print("-------------- First order GHF energies --------------")
+    print('Atom     x                y                z')
+    for i, n in enumerate(range(mol.natm)):
+        print('%d %s  %15.10f  %15.10f  %15.10f' %
+              (n, mol.atom_symbol(n), e1_mat[i,0], e1_mat[i,1], e1_mat[i,2]))
+    print("------------------------------------------------------")
+
+    return e1_mat
+
+
+def write_e1_single(mol, nelec, atom, coord, complexsymmetric):
+
+    r"""Gives energy derivative for a specific pertubation defined by an atom
+    and coordinate.
+
+    :param mol: PySCF molecule object.
+    :param nelec: The number of electrons in the molecule, determines which
+            orbitals are occupied and virtual.
+    :param atom: Input for which atom is being perturbed, with atoms numbered
+            according to the PySCF molecule.
+    :param coord: Input for along which coordinate the pertubation of the atom
+            lies.
+            coord = '0' for x
+                    '1' for y
+                    '2' for z
+    :param complexsymmetric: If :const:'True', :math:'/diamond = /star'.
+            If :const:'False', :math:'\diamond = \hat{e}'.
+
+    :returns: single scalar for the energy derivative of a specific
+            pertubation.
+    """
+
+    if coord == 0:
+        pert = "x"
+    elif coord == 1:
+        pert = "y"
+    elif coord == 2:
+        pert = "z"
+
+    g1 = g1_iteration(complexsymmetric, mol, atom, coord, nelec)
+    e1_elec = get_e1_elec(mol, g1,atom, coord, complexsymmetric, nelec)
+    e1_nuc = get_e1_nuc(mol, atom, coord)
+    e1 = e1_elec + e1_nuc
+
+    print("The molecule has atoms:")
+    for i, n in enumerate(range(mol.natm)):
+        print(n, mol.atom_pure_symbol(i), "at coordinates", mol.atom_coord(i))
+
+    print("\nThe", mol.atom_pure_symbol(atom), "atom with index", atom,
+          "at coordinates", mol.atom_coord(atom),
+          "is perturbed in the positive", pert, "direction\n")
+
+    print("########################")
+    print("First order electronic energy:\n", e1_elec)
+    print("First order nuclear repulsion energy:\n",
+          get_e1_nuc(mol,atom,coord))
+    print("Total first order energy:\n", get_e1_nuc(mol,atom,coord) + e1_elec)
+    print("########################\n")
+
+    return e1
