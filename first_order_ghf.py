@@ -1,4 +1,5 @@
 from pyscf import gto, scf, grad
+import time
 import numpy as np
 from zeroth_order_ghf import rhf_to_ghf, get_p0, get_hcore0, get_pi0, get_f0,\
 get_e0_nuc, get_e0_elec
@@ -190,9 +191,11 @@ def get_pi1(mol, atom, coord):
                                                + twoe[k][l][i][j] * lambda_k
                                                + twoe[l][k][i][j] * lambda_l)
 
-    j1_spatial = np.einsum("abcd->acbd", j1_spatial) #convert to physicists
+    j1_spatial = np.einsum("abcd->acbd", j1_spatial,
+                           optimize='optimal') #convert to physicists
     j1 = np.kron(spin_j, j1_spatial)
-    k1 = np.einsum("ijkl->ijlk", j1) #physicists notation
+    k1 = np.einsum("ijkl->ijlk", j1,
+                   optimize='optimal') #physicists notation
 
     pi1 = j1 - k1
 
@@ -219,8 +222,8 @@ def get_f1(pi0, p0, hcore1, pi1, p1):
     """
 
     f1_1 = hcore1
-    f1_2 = np.einsum("ijkl,lj->ik", pi0, p1)
-    f1_3 = np.einsum("ijkl,lj->ik", pi1, p0)
+    f1_2 = np.einsum("ijkl,lj->ik", pi0, p1, optimize='optimal')
+    f1_3 = np.einsum("ijkl,lj->ik", pi1, p0, optimize='optimal')
 
     f1 = f1_1 + f1_2 + f1_3
 
@@ -267,7 +270,8 @@ def get_g1_x(f1_x, s1_x, eta0, nelec):
     return g1_x
 
 
-def g1_iteration(complexsymmetric: bool, mol, atom, coord, nelec):
+def g1_iteration(complexsymmetric: bool, mol, atom, coord, nelec,
+                 g0_rhf = None):
 
     r"""Calculates the first order coefficient matrix self consistently given
     that :math:'\mathbf{G^{(1)}}' and :math:'\mathbf{F^{(1)}}' depend on one
@@ -287,6 +291,9 @@ def g1_iteration(complexsymmetric: bool, mol, atom, coord, nelec):
                     '2' for z
     :param nelec: The number of electrons in the molecule, determines which
             orbitals are occupied and virtual.
+    :param g0_rhf: An optional argument for which the user can specify a g0
+            zeroth order molecular coefficient matrix in RHF. By default this
+            is set to None and g0 will be obtained from PySCF.
 
     :returns: The converged first order coefficient matrix.
     """
@@ -294,8 +301,12 @@ def g1_iteration(complexsymmetric: bool, mol, atom, coord, nelec):
     m = scf.RHF(mol)
     m.verbose = 0
     m.kernel()
-    g0_rhf = m.mo_coeff
-    g0 = rhf_to_ghf(g0_rhf, nelec)
+
+    if g0_rhf is None:
+        g0_rhf = m.mo_coeff
+        g0 = rhf_to_ghf(g0_rhf, nelec)
+    else:
+        g0 = rhf_to_ghf(g0_rhf, nelec)
 
     x = g0
     s1 = get_s1(mol, atom, coord)
@@ -345,7 +356,7 @@ def g1_iteration(complexsymmetric: bool, mol, atom, coord, nelec):
     iter_num = 0
     delta_g1_x = 1
 
-    while delta_g1_x > 1e-10:
+    while delta_g1_x > 1e-14:
 
         iter_num += 1
         p1_x = get_p1(g0_x, g1_x, complexsymmetric, nelec)

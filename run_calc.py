@@ -4,18 +4,18 @@ from first_order_ghf import g1_iteration, write_e1_mat, write_e1_single
 from zeroth_order_ghf import rhf_to_ghf
 
 "H2"
-# mol = gto.M(
-#         atom = (
-#             f"H 0 0 0;"
-#             f"H 0 0 1;"
-#         ),
-#         basis = 'sto-3g',
-#         unit = 'Bohr',
-#         charge = 0,
-#         spin = 0)
-# nelec = 2
-# atom = 1
-# coord = 2
+mol = gto.M(
+        atom = (
+            f"H 0 0 0;"
+            f"H 0 0 1;"
+        ),
+        basis = 'sto-3g',
+        unit = 'Bohr',
+        charge = 0,
+        spin = 0)
+nelec = 2
+atom = 1
+coord = 2
 
 "OH-"
 # mol = gto.M(
@@ -31,7 +31,7 @@ from zeroth_order_ghf import rhf_to_ghf
 # atom = 1
 # coord = 2
 
-"H3 C2v"
+"H3+ C2v"
 # mol = gto.M(
 #         atom = (
 #             f"H 0 0.3745046 -1.9337695;"
@@ -40,26 +40,26 @@ from zeroth_order_ghf import rhf_to_ghf
 #         ),
 #         basis = 'sto-3g',
 #         unit = 'Bohr',
-#         charge = 0,
-#         spin = 1)
-# nelec = 3
+#         charge = 1,
+#         spin = 0)
+# nelec = 2
 # atom = 1
 # coord = 1
 
 "H2O"
-mol = gto.M(
-        atom = (
-            f"O 0 0.1088584 0;"
-            f"H 0 -0.8636449 1.2990232;"
-            f"H 0 -0.8636449 -1.2990232;"
-        ),
-        basis = '6-31g',
-        unit = 'Bohr',
-        charge = 0,
-        spin = 0)
-nelec = 10
-atom = 0
-coord = 1
+# mol = gto.M(
+#         atom = (
+#             f"O 0 0.1088584 0;"
+#             f"H 0 -0.8636449 1.2990232;"
+#             f"H 0 -0.8636449 -1.2990232;"
+#         ),
+#         basis = '6-31g',
+#         unit = 'Bohr',
+#         charge = 0,
+#         spin = 0)
+# nelec = 10
+# atom = 0
+# coord = 0
 
 m = scf.RHF(mol)
 m.kernel()
