@@ -33,6 +33,36 @@ def rhf_to_ghf(g0_rhf, nelec):
     return g0_ghf
 
 
+def uhf_to_ghf(g0_uhf_alpha, g0_uhf_beta, nalpha, nbeta):
+
+    r"""Calculates the GHF MO coefficient matrix from the UHF alpha and beta
+    coefficient matrices, organised in blocks of occupied then virtual
+    orbitals.
+
+    :param g0_uhf_alpha: UHF MO coefficient matrix for alpha orbitals.
+    :param g0_uhf_beta: UHF MO coefficient matrix for beta orbitals.
+    :param nalpha: Number of alpha electrons.
+    :param nbeta: Number of beta electrons.
+
+    :returns: GHF MO coefficient matrix.
+    """
+
+    assert np.allclose(g0_uhf_alpha.shape[0], g0_uhf_beta.shape[0])
+
+    nbasis = g0_uhf_alpha.shape[1]
+
+    g0_ghf = np.block([[g0_uhf_alpha[:, 0:nalpha],
+                        np.zeros_like(g0_uhf_beta[:, 0:nbeta]),
+                        g0_uhf_alpha[:, nalpha:nbasis],
+                        np.zeros_like(g0_uhf_beta[:, nbeta:nbasis])],
+                       [np.zeros_like(g0_uhf_alpha[:, 0:nalpha]),
+                        g0_uhf_beta[:, 0:nbeta],
+                        np.zeros_like(g0_uhf_alpha[:, nalpha:nbasis]),
+                        g0_uhf_beta[:, nbeta:nbasis]]])
+
+    return g0_ghf
+
+
 def get_x_lowdin(mol, thresh: float = 1e-14):
 
     r"""Calculates canonical basis orthogonalisation matrix x, defined by:
@@ -142,6 +172,32 @@ def get_pi0(mol):
     pi0 = j - k
 
     return pi0
+
+
+def get_j0(mol):
+
+    r"""Calculate the 4 dimensional zeroth order j tensor.
+    Each element is given by:
+
+    .. math::
+
+        \mathbf{\Pi_{\delta'\mu',\epsilon'\nu',\delta\mu,\epsilon\nu}^{(0)}}
+        = \mathbf{\Omega_{\delta'\delta}\Omega_{\epsilon'\epsilon}}
+          \left(\mu'\mu|\nu'\nu\right)
+
+    :param mol: The class for a molecule as defined by PySCF.
+
+    :returns: The zeroth order j tensor.
+    """
+
+    spatial_j = mol.intor('int2e')
+    phys_spatial_j = np.einsum("abcd->acbd", spatial_j)
+    omega = np.identity(2)
+    spin_j = np.einsum("ij,kl->ikjl", omega, omega)
+    j = np.kron(spin_j, phys_spatial_j)
+    j = np.einsum("acbd->abcd", j)
+
+    return j
 
 
 def get_f0(hcore0, pi0, p0):
