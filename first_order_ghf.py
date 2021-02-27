@@ -202,6 +202,82 @@ def get_pi1(mol, atom, coord):
     return pi1
 
 
+def get_j1(mol, atom, coord):
+
+    r"""Calculates the 4 dimensional first order j tensor of coloumb integrals
+    by digesting the of 2 electron integrals given by PySCF.
+    Symmetry of the 2 electron integrals is manipulated to digest the PySCF
+    tensor, in which the first MO of each 2 electron integral has been
+    differentiated.
+    Each element is given by:
+
+    .. math::
+
+       \mathbf{\Pi_{\delta'\mu',\epsilon'\nu',\delta\mu,\epsilon\nu}^{(1)}}
+       = \mathbf{\Omega_{\delta'\delta}\Omega_{\epsilon'\epsilon}}
+       \left(\mu'\mu|\nu'\nu\right)^{(1)}
+
+       \left(\mu'\mu|\nu'\nu\right)^{(1)}
+       =\left(\frac{\partial\phi_{\mu'}}{\partial a}\phi_{\mu}|
+       \phi_{\nu'}\phi_{\nu}\right)
+       +\left(\phi_{\mu'}\frac{\partial\phi_{\mu}}{\partial a}|
+       \phi_{\nu'}\phi_{\nu}\right)
+       +\left(\phi_{\mu'}\phi_{\mu}|
+       \frac{\partial\phi_{\nu'}}{\partial a}\phi_{\nu}\right)
+       +\left(\phi_{\mu'}\phi_{\mu}|
+       \phi_{\nu'}\frac{\partial\phi_{\nu}}{\partial a}\right)
+
+    :param mol: Molecule class as defined by PySCF.
+    :param atom: Input for which atom is being perturbed, with atoms numbered
+            according to the PySCF molecule.
+    :param coord: Input for along which coordinate the pertubation of the atom
+            lies.
+            coord = '0' for x
+                    '1' for y
+                    '2' for z
+
+    :returns: First order 4 dimensional j tensor.
+    """
+
+    omega = np.identity(2)
+    spin_j = np.einsum("ij,kl->ikjl", omega, omega)
+
+    twoe = -mol.intor("int2e_ip1")[coord] #minus sign due to pyscf definition
+
+    j1_spatial = np.zeros((twoe.shape[0],twoe.shape[0],twoe.shape[0],
+                           twoe.shape[0]))
+
+    for i in range(twoe.shape[0]):
+
+        lambda_i = int(i in range(mol.aoslice_by_atom()[atom][2],
+                                  mol.aoslice_by_atom()[atom][3]))
+
+        for j in range(twoe.shape[0]):
+
+            lambda_j = int(j in range(mol.aoslice_by_atom()[atom][2],
+                                      mol.aoslice_by_atom()[atom][3]))
+
+            for k in range(twoe.shape[0]):
+
+                lambda_k = int(k in range(mol.aoslice_by_atom()[atom][2],
+                                          mol.aoslice_by_atom()[atom][3]))
+
+                for l in range(twoe.shape[0]):
+
+                    lambda_l = int(l in range(mol.aoslice_by_atom()[atom][2],
+                                              mol.aoslice_by_atom()[atom][3]))
+
+                    j1_spatial[i][j][k][l] += (twoe[i][j][k][l] * lambda_i
+                                               + twoe[j][i][k][l] * lambda_j
+                                               + twoe[k][l][i][j] * lambda_k
+                                               + twoe[l][k][i][j] * lambda_l)
+
+    j1_spatial = np.einsum("abcd->acbd", j1_spatial,
+                           optimize='optimal') #convert to physicists
+    j1 = np.kron(spin_j, j1_spatial)
+
+    return j1
+
 def get_f1(pi0, p0, hcore1, pi1, p1):
 
     r"""Calculate the first order fock matrix, defined by
@@ -271,7 +347,7 @@ def get_g1_x(f1_x, s1_x, eta0, nelec):
 
 
 def g1_iteration(complexsymmetric: bool, mol, atom, coord, nelec,
-                 g0_rhf = None):
+                 g0_ghf = None):
 
     r"""Calculates the first order coefficient matrix self consistently given
     that :math:'\mathbf{G^{(1)}}' and :math:'\mathbf{F^{(1)}}' depend on one
@@ -291,22 +367,21 @@ def g1_iteration(complexsymmetric: bool, mol, atom, coord, nelec,
                     '2' for z
     :param nelec: The number of electrons in the molecule, determines which
             orbitals are occupied and virtual.
-    :param g0_rhf: An optional argument for which the user can specify a g0
+    :param g0_ghf: An optional argument for which the user can specify a g0
             zeroth order molecular coefficient matrix in RHF. By default this
-            is set to None and g0 will be obtained from PySCF.
+            is set to None and g0 in RHF will be obtained from PySCF.
 
     :returns: The converged first order coefficient matrix.
     """
 
-    m = scf.RHF(mol)
-    m.verbose = 0
-    m.kernel()
-
-    if g0_rhf is None:
+    if g0_ghf is None:
+        m = scf.RHF(mol)
+        m.verbose = 0
+        m.kernel()
         g0_rhf = m.mo_coeff
         g0 = rhf_to_ghf(g0_rhf, nelec)
     else:
-        g0 = rhf_to_ghf(g0_rhf, nelec)
+        g0 = g0_ghf
 
     x = g0
     s1 = get_s1(mol, atom, coord)
@@ -491,7 +566,7 @@ def get_e1_elec(mol, g1, atom, coord, complexsymmetric: bool, nelec):
     return e1_elec
 
 
-def write_e1_mat(mol, nelec, complexsymmetric):
+def write_e1_mat(mol, nelec, complexsymmetric, g0_ghf = None):
 
     r"""Writes matrix of ghf energy derivatives for each atom and coordinate.
 
@@ -500,6 +575,9 @@ def write_e1_mat(mol, nelec, complexsymmetric):
             orbitals are occupied and virtual.
     :param complexsymmetric: If :const:'True', :math:'/diamond = /star'.
             If :const:'False', :math:'\diamond = \hat{e}'.
+    :param g0_ghf: An optional argument for which the user can specify a g0
+            zeroth order molecular coefficient matrix in RHF. By default this
+            is set to None and g0 in RHF will be obtained from PySCF.
 
     :returns: natom x 3 matrix of ghf energy derivatives.
     """
@@ -510,7 +588,11 @@ def write_e1_mat(mol, nelec, complexsymmetric):
 
             atom = i
             coord = j
-            g1 = g1_iteration(complexsymmetric, mol, i, j, nelec)
+            if g0_ghf is None:
+                g1 = g1_iteration(complexsymmetric, mol, atom, coord, nelec)
+            else:
+                g1 = g1_iteration(complexsymmetric, mol, atom, coord, nelec,
+                                  g0_ghf)
             e1_elec = get_e1_elec(mol, g1, i, j, complexsymmetric, nelec)
             e1_nuc = get_e1_nuc(mol, i, j)
             e1 = e1_elec + e1_nuc
@@ -527,7 +609,7 @@ def write_e1_mat(mol, nelec, complexsymmetric):
     return e1_mat
 
 
-def write_e1_single(mol, nelec, atom, coord, complexsymmetric):
+def write_e1_single(mol, nelec, atom, coord, complexsymmetric, g0_ghf = None):
 
     r"""Gives energy derivative for a specific pertubation defined by an atom
     and coordinate.
@@ -544,6 +626,9 @@ def write_e1_single(mol, nelec, atom, coord, complexsymmetric):
                     '2' for z
     :param complexsymmetric: If :const:'True', :math:'/diamond = /star'.
             If :const:'False', :math:'\diamond = \hat{e}'.
+    :param g0_ghf: An optional argument for which the user can specify a g0
+            zeroth order molecular coefficient matrix in RHF. By default this
+            is set to None and g0 in RHF will be obtained from PySCF.
 
     :returns: single scalar for the energy derivative of a specific
             pertubation.
@@ -556,8 +641,12 @@ def write_e1_single(mol, nelec, atom, coord, complexsymmetric):
     elif coord == 2:
         pert = "z"
 
-    g1 = g1_iteration(complexsymmetric, mol, atom, coord, nelec)
-    e1_elec = get_e1_elec(mol, g1,atom, coord, complexsymmetric, nelec)
+    if g0_ghf is None:
+        g1 = g1_iteration(complexsymmetric, mol, atom, coord, nelec)
+    else:
+        g1 = g1_iteration(complexsymmetric, mol, atom, coord, nelec, g0_ghf)
+
+    e1_elec = get_e1_elec(mol, g1, atom, coord, complexsymmetric, nelec)
     e1_nuc = get_e1_nuc(mol, atom, coord)
     e1 = e1_elec + e1_nuc
 
