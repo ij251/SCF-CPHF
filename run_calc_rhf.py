@@ -56,20 +56,26 @@ coord = 2
 #             f"H 0 -0.8636449 1.2990232;"
 #             f"H 0 -0.8636449 -1.2990232;"
 #         ),
-#         basis = '6-31g',
+#         basis = 'sto-3g',
 #         unit = 'Bohr',
 #         charge = 0,
 #         spin = 0)
 # nelec = 10
 # atom = 0
-# coord = 0
+# coord = 1
 
 
 m = scf.RHF(mol)
 m.kernel()
+
+print("goRHF:\n", m.mo_coeff)
+print("g0GHF:\n", rhf_to_ghf(m.mo_coeff, nelec))
+
 print("\nPySCF output of first order energies:")
 g = grad.rhf.Gradients(m)
 g.kernel()
 
+g1 = g1_iteration(False, mol, atom, coord, nelec)
+# print("g1:\n", g1)
 write_e1_single(mol, nelec, atom, coord, False)
 write_e1_mat(mol, nelec, False)

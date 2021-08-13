@@ -164,7 +164,7 @@ def get_p1(g0, g1, complexsymmetric, nelec):
     return p1
 
 
-def get_hcore0(mol):
+def get_hcore0_spatial(mol):
 
     r"""Calculates The zeroth order core hamiltonian.
     Each element is given by:
@@ -179,16 +179,16 @@ def get_hcore0(mol):
     :returns: The zeroth order core hamiltonian matrix.
     """
 
-    hcore0 = (mol.intor('int1e_nuc')
-              + mol.intor('int1e_kin'))
+    hcore0_spatial = (mol.intor('int1e_nuc')
+                      + mol.intor('int1e_kin'))
 
     # omega = np.identity(2)
     # hcore0 =  np.kron(omega, hcore0)
 
-    return hcore0
+    return hcore0_spatial
 
 
-def get_pi0(mol):
+def get_pi0_spatial(mol):
 
     r"""Calculate the 4 dimensional zeroth order Pi tensor.
     Each element is given by:
@@ -213,12 +213,12 @@ def get_pi0(mol):
     # j = np.kron(spin_j, phys_spatial_j)
     j = phys_spatial_j
     k = np.einsum("ijkl->ijlk", j)
-    pi0 = 2*j - k
+    pi0_spatial = 2*j - k
 
-    return pi0
+    return pi0_spatial
 
 
-def get_f0(hcore0, pi0, p0):
+def get_f0_spatial(hcore0, pi0, p0):
 
     r"""Calculates the zeroth order fock matrix, defined by:
 
@@ -237,9 +237,9 @@ def get_f0(hcore0, pi0, p0):
 
     f0_1e = hcore0
     f0_2e = np.einsum("ijkl,jl->ik", pi0, p0)
-    f0 = f0_1e + f0_2e
+    f0_spatial = f0_1e + f0_2e
 
-    return f0
+    return f0_spatial
 
 
 def get_hcore1(mol, atom, coord):

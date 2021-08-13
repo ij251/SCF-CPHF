@@ -1,5 +1,6 @@
 from pyscf import gto, scf, grad
 import numpy as np
+# from spatial_CPHF_functions import *
 
 
 def rhf_to_ghf(g0_rhf, nelec):

@@ -1,6 +1,7 @@
 from pyscf import gto, scf, grad
 import time
 import numpy as np
+import scipy
 from zeroth_order_ghf import rhf_to_ghf, get_p0, get_hcore0, get_pi0, get_f0,\
 get_e0_nuc, get_e0_elec
 
@@ -25,24 +26,25 @@ def get_s1(mol, atom, coord):
     :returns: First order overlap matrix.
     """
 
-    s0 = mol.intor("int1e_ovlp")
-    onee = -mol.intor("int1e_ipovlp") #minus sign due to pyscf definition
-    s1 = np.zeros_like(s0)
+    s_py = -mol.intor("int1e_ipovlp")[coord]
+    #minus sign due to pyscf definition
+    s1 = np.zeros_like(s_py)
 
-    for i in range(s0.shape[1]):
+    for i in range(s_py.shape[1]):
 
         lambda_i = int(i in range(mol.aoslice_by_atom()[atom][2],
                                   mol.aoslice_by_atom()[atom][3]))
 
-        for j in range(s0.shape[1]):
+        for j in range(s_py.shape[1]):
 
             lambda_j = int(j in range(mol.aoslice_by_atom()[atom][2],
                                       mol.aoslice_by_atom()[atom][3]))
 
-            s1[i][j] += onee[coord][i][j]*lambda_i+onee[coord][j][i]*lambda_j
+            s1[i][j] += s_py[i][j]*lambda_i+s_py[j][i]*lambda_j
 
     omega = np.identity(2)
     s1 = np.kron(omega, s1)
+    np.set_printoptions(precision=3)
 
     return s1
 
@@ -161,35 +163,35 @@ def get_pi1(mol, atom, coord):
     omega = np.identity(2)
     spin_j = np.einsum("ij,kl->ikjl", omega, omega)
 
-    twoe = -mol.intor("int2e_ip1")[coord] #minus sign due to pyscf definition
+    pi_py = -mol.intor("int2e_ip1")[coord] #minus sign due to pyscf definition
 
-    j1_spatial = np.zeros((twoe.shape[0],twoe.shape[0],twoe.shape[0],
-                           twoe.shape[0]))
+    j1_spatial = np.zeros((pi_py.shape[0],pi_py.shape[0],pi_py.shape[0],
+                           pi_py.shape[0]))
 
-    for i in range(twoe.shape[0]):
+    for i in range(pi_py.shape[0]):
 
         lambda_i = int(i in range(mol.aoslice_by_atom()[atom][2],
                                   mol.aoslice_by_atom()[atom][3]))
 
-        for j in range(twoe.shape[0]):
+        for j in range(pi_py.shape[0]):
 
             lambda_j = int(j in range(mol.aoslice_by_atom()[atom][2],
                                       mol.aoslice_by_atom()[atom][3]))
 
-            for k in range(twoe.shape[0]):
+            for k in range(pi_py.shape[0]):
 
                 lambda_k = int(k in range(mol.aoslice_by_atom()[atom][2],
                                           mol.aoslice_by_atom()[atom][3]))
 
-                for l in range(twoe.shape[0]):
+                for l in range(pi_py.shape[0]):
 
                     lambda_l = int(l in range(mol.aoslice_by_atom()[atom][2],
                                               mol.aoslice_by_atom()[atom][3]))
 
-                    j1_spatial[i][j][k][l] += (twoe[i][j][k][l] * lambda_i
-                                               + twoe[j][i][k][l] * lambda_j
-                                               + twoe[k][l][i][j] * lambda_k
-                                               + twoe[l][k][i][j] * lambda_l)
+                    j1_spatial[i][j][k][l] += (pi_py[i][j][k][l] * lambda_i
+                                               + pi_py[j][i][k][l] * lambda_j
+                                               + pi_py[k][l][i][j] * lambda_k
+                                               + pi_py[l][k][i][j] * lambda_l)
 
     j1_spatial = np.einsum("abcd->acbd", j1_spatial,
                            optimize='optimal') #convert to physicists
@@ -330,14 +332,11 @@ def get_g1_x(f1_x, s1_x, eta0, nelec):
 
     g1_x = np.zeros_like(f1_x)
 
-    for i in range(nocc, nbasis):
-        for j in range(nocc):
+    for j in range(nocc, nbasis):
+        for i in range(nocc):
 
             delta_eta0 = eta0[j] - eta0[i]
             g1_x[i,j] = (f1_x[i,j] - eta0[j]*s1_x[i,j])/delta_eta0
-            # print(i, j)
-            # print("delta_eta0:\n", delta_eta0)
-
 
     for j in range(nbasis):
 
@@ -384,6 +383,8 @@ def g1_iteration(complexsymmetric: bool, mol, atom, coord, nelec,
         g0 = g0_ghf
 
     x = g0
+    s0 = mol.intor("int1e_ovlp")
+    s0 = np.kron(np.identity(2), s0)
     s1 = get_s1(mol, atom, coord)
     p0 = get_p0(g0, complexsymmetric, nelec)
     hcore0 = get_hcore0(mol)
@@ -421,11 +422,11 @@ def g1_iteration(complexsymmetric: bool, mol, atom, coord, nelec,
                           x.T, pi1, x, x, x.T,
                           optimize = 'optimal')
 
+
     eta0, g0_x = np.linalg.eig(f0_x)
     index = np.argsort(eta0)
     eta0 = eta0[index]
     g0_x = g0_x[:, index] #Order g0 columns according to eigenvalues
-
     g1_x_guess = np.zeros_like(g0)
     g1_x = g1_x_guess
     iter_num = 0
@@ -491,7 +492,8 @@ def get_e1_nuc(mol, atom, coord):
     return e1_nuc
 
 
-def get_e1_elec(mol, g1, atom, coord, complexsymmetric: bool, nelec):
+def get_e1_elec(mol, g1, atom, coord, complexsymmetric: bool, nelec,
+                g0_ghf = None):
 
     r"""Calculates the first order electronic energy.
     Defined as follows:
@@ -535,11 +537,14 @@ def get_e1_elec(mol, g1, atom, coord, complexsymmetric: bool, nelec):
     :returns: The first order electronic energy
     """
 
-    m = scf.RHF(mol)
-    m.verbose = 0
-    m.kernel()
-    g0_rhf = m.mo_coeff
-    g0 = rhf_to_ghf(g0_rhf, nelec)
+    if g0_ghf is None:
+        m = scf.RHF(mol)
+        m.verbose = 0
+        m.kernel()
+        g0_rhf = m.mo_coeff
+        g0 = rhf_to_ghf(g0_rhf, nelec)
+    else:
+        g0 = g0_ghf
 
     p0 = get_p0(g0, complexsymmetric, nelec)
     p1 = get_p1(g0, g1, complexsymmetric, nelec)
@@ -556,14 +561,32 @@ def get_e1_elec(mol, g1, atom, coord, complexsymmetric: bool, nelec):
     f1_prime_2e = (0.5 * np.einsum("ijkl,jl->ik", pi1, p0)
                    + 0.5 * np.einsum("ijkl,jl->ik", pi0, p1))
 
-    e1_elec_1e = (np.einsum("ij,ij->",f0_prime_1e, p1)
-                  + np.einsum("ij,ij->",f1_prime_1e, p0))
-    e1_elec_2e = (np.einsum("ij,ij->",f0_prime_2e, p1)
-                  + np.einsum("ij,ij->",f1_prime_2e, p0))
+    e1_elec_1e = (np.einsum("ij,ji->",f0_prime_1e, p1)
+                  + np.einsum("ij,ji->",f1_prime_1e, p0))
+    e1_elec_2e = (np.einsum("ij,ji->",f0_prime_2e, p1)
+                  + np.einsum("ij,ji->",f1_prime_2e, p0))
 
     e1_elec = e1_elec_1e + e1_elec_2e
 
     return e1_elec
+
+
+def get_e1_scf(mol, atom, coord, nelec, complexsymmetric, g0_ghf=None):
+
+    if g0_ghf is None:
+
+        g1 = g1_iteration(complexsymmetric, mol, atom, coord, nelec)
+        e1_elec = get_e1_elec(mol, g1, atom, coord, complexsymmetric, nelec)
+
+    else:
+
+        g1 = g1_iteration(complexsymmetric, mol, atom, coord, nelec, g0_ghf)
+        e1_elec = get_e1_elec(mol, g1, atom, coord, complexsymmetric, nelec,
+                              g0_ghf)
+
+    e1_nuc = get_e1_nuc(mol, atom, coord)
+
+    return e1_elec + e1_nuc
 
 
 def write_e1_mat(mol, nelec, complexsymmetric, g0_ghf = None):
@@ -586,14 +609,14 @@ def write_e1_mat(mol, nelec, complexsymmetric, g0_ghf = None):
     for i in range(mol.natm):
         for j in range(3):
 
-            atom = i
-            coord = j
             if g0_ghf is None:
-                g1 = g1_iteration(complexsymmetric, mol, atom, coord, nelec)
+                g1 = g1_iteration(complexsymmetric, mol, i, j, nelec)
+                e1_elec = get_e1_elec(mol, g1, i, j, complexsymmetric, nelec)
             else:
-                g1 = g1_iteration(complexsymmetric, mol, atom, coord, nelec,
+                g1 = g1_iteration(complexsymmetric, mol, i, j, nelec,
                                   g0_ghf)
-            e1_elec = get_e1_elec(mol, g1, i, j, complexsymmetric, nelec)
+                e1_elec = get_e1_elec(mol, g1, i, j, complexsymmetric, nelec,
+                                      g0_ghf)
             e1_nuc = get_e1_nuc(mol, i, j)
             e1 = e1_elec + e1_nuc
 
@@ -643,10 +666,12 @@ def write_e1_single(mol, nelec, atom, coord, complexsymmetric, g0_ghf = None):
 
     if g0_ghf is None:
         g1 = g1_iteration(complexsymmetric, mol, atom, coord, nelec)
+        e1_elec = get_e1_elec(mol, g1, atom, coord, complexsymmetric, nelec)
     else:
         g1 = g1_iteration(complexsymmetric, mol, atom, coord, nelec, g0_ghf)
+        e1_elec = get_e1_elec(mol, g1, atom, coord, complexsymmetric, nelec,
+                              g0_ghf)
 
-    e1_elec = get_e1_elec(mol, g1, atom, coord, complexsymmetric, nelec)
     e1_nuc = get_e1_nuc(mol, atom, coord)
     e1 = e1_elec + e1_nuc
 
